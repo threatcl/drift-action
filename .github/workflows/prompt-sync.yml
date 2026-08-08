@@ -1,0 +1,25 @@
+name: prompt-sync
+
+# Detects upstream movement of the vendored drift prompt. Deliberately not
+# part of PR CI: upstream churn should trigger a deliberate re-vendor and
+# re-derivation review, not block unrelated PRs.
+on:
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compare vendored prompt against upstream HEAD
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/threatcl/claude-plugin/main/commands/threat-drift.md -o /tmp/upstream-threat-drift.md
+          if ! diff -u prompts/upstream/threat-drift.md /tmp/upstream-threat-drift.md; then
+            echo "::error::Upstream threat-drift.md has changed. Re-vendor prompts/upstream/, update SOURCE, and review drift-ci.md against ADAPTATIONS.md."
+            exit 1
+          fi

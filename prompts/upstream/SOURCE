@@ -1,0 +1,4 @@
+repo: github.com/threatcl/claude-plugin
+path: commands/threat-drift.md
+commit: 3a4a5f654cb6224b0e0d2cbf7a9db5893f5f6936
+vendored: 2026-08-08
