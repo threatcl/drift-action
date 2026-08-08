@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Threatcl drift report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "no_drift", "summary", "findings"],
+  "properties": {
+    "schema_version": { "const": "0.1" },
+    "no_drift": {
+      "type": "boolean",
+      "description": "True only when the threat model is consistent with the changes"
+    },
+    "summary": {
+      "type": "string",
+      "description": "One sentence: finding counts and the highest-priority item, or a plain statement that there is no drift"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "category",
+          "severity",
+          "title",
+          "model_excerpt",
+          "evidence",
+          "relevance",
+          "agent_prompt",
+          "suggested_fix"
+        ],
+        "properties": {
+          "category": {
+            "enum": [
+              "stale_assertion",
+              "phantom_control",
+              "unmodeled_surface",
+              "dfd_drift",
+              "dependency_drift",
+              "unclassified_data"
+            ]
+          },
+          "severity": {
+            "enum": ["action_required", "review_recommended"]
+          },
+          "title": { "type": "string" },
+          "model_excerpt": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["file", "line", "quote"],
+            "properties": {
+              "file": { "type": "string" },
+              "line": { "type": "integer" },
+              "quote": { "type": "string" }
+            }
+          },
+          "evidence": {
+            "type": "array",
+            "description": "file:line citations from the diff or repo; a finding without evidence is discarded",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["file", "line", "note"],
+              "properties": {
+                "file": { "type": "string" },
+                "line": { "type": "integer" },
+                "note": { "type": "string" }
+              }
+            }
+          },
+          "relevance": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["rating", "justification"],
+            "properties": {
+              "rating": { "enum": ["strong", "moderate", "weak"] },
+              "justification": { "type": "string" }
+            }
+          },
+          "agent_prompt": {
+            "type": "string",
+            "description": "Self-contained copy-paste prompt for an AI coding agent to apply the model update"
+          },
+          "suggested_fix": {
+            "type": "string",
+            "description": "One-line description of the HCL edit"
+          }
+        }
+      }
+    }
+  }
+}
