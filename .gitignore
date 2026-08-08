@@ -1,0 +1,15 @@
+# internal planning docs — never commit these
+github-drift-integration-plan.md
+prior-claude-chat.md
+
+# build artifacts
+/drift-action
+/bin/
+/dist/
+*.test
+coverage.out
+
+# local
+.DS_Store
+.env
+.claude/settings.local.json
