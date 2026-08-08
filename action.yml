@@ -1,0 +1,42 @@
+name: 'Threatcl Drift'
+description: 'Threat model drift review for pull requests, powered by threatcl'
+author: 'Christian @xntrik Frichot'
+branding:
+  icon: 'shield'
+  color: 'purple'
+inputs:
+  config-path:
+    description: 'Path to the drift config file'
+    required: false
+    default: '.threatcl-ci.hcl'
+  anthropic-api-key:
+    description: 'Anthropic API key used for inference. Omit to run deterministic checks only.'
+    required: false
+    default: ''
+  github-token:
+    description: 'Token used to read the PR diff and write the comment and check run'
+    required: false
+    default: ${{ github.token }}
+  fail-mode:
+    description: 'Override the config fail mode: never | on-action-required'
+    required: false
+    default: ''
+  model:
+    description: 'Override the LLM model from config'
+    required: false
+    default: ''
+outputs:
+  findings-count:
+    description: 'Total number of drift findings'
+  action-required-count:
+    description: 'Findings at the Action required tier'
+  verdict:
+    description: 'clean | findings | action-required | skipped | error'
+  report-path:
+    description: 'Workspace-relative path to the rendered markdown report'
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+    GITHUB_TOKEN: ${{ inputs.github-token }}
