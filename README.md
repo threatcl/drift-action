@@ -57,7 +57,7 @@ jobs:
 | Input | Default | Description |
 |-------|---------|-------------|
 | `config-path` | `.threatcl-ci.hcl` | Path to the drift config file |
-| `anthropic-api-key` | — | LLM API key; omit to run deterministic checks only |
+| `anthropic-api-key` | — | LLM API key; without one, no drift category is assessed |
 | `github-token` | `${{ github.token }}` | Reads the PR diff, writes the comment/check |
 | `fail-mode` | from config | `never` \| `on-action-required` |
 | `model` | from config | Override the LLM model |
@@ -167,8 +167,9 @@ result that hides real drift, which is the worst outcome this action has.
 ## Security notes
 
 - Use the `pull_request` trigger (as scaffolded above), not
-  `pull_request_target`. Fork PRs then run without secrets and the action
-  degrades to deterministic-only checks.
+  `pull_request_target`. Fork PRs then run without secrets, so no review is
+  produced and the comment says so — rather than posting a shallow result that
+  looks like a review and is not.
 - PR content is treated as data, never instructions; the LLM's output is
   forced into a JSON schema and influences nothing but the report body, and
   findings without code evidence are discarded.

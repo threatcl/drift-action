@@ -102,7 +102,12 @@ func run(ctx context.Context) error {
 	log.Printf("diff: %d changed files, %d to review (%d noise, %d narrowed out)",
 		len(comparison.Changes), len(filtered.Kept), filtered.Noise, filtered.NarrowedOut)
 
-	report, info := analyze(cfg, assertions, summary, filtered, comparison)
+	// Facts the prompt will carry once inference lands. Extracted here so the
+	// path is exercised, and printed under dry run for inspection.
+	manifestFacts := deps.Facts(filtered.Kept)
+	log.Printf("dependency manifest changes: %d", len(manifestFacts))
+
+	report, info := analyze(cfg, summary, filtered, comparison)
 
 	if dropped := findings.Sanitize(report); len(dropped) > 0 {
 		// The evidence rule is enforced here, not just in the prompt.
@@ -121,8 +126,10 @@ func run(ctx context.Context) error {
 
 	if cfg.DryRun {
 		// Print the comment rather than posting it, so a dry run is useful on
-		// its own without hunting for the report file.
-		fmt.Printf("\n%s\n", body)
+		// its own without hunting for the report file. The manifest facts go
+		// with it: they are prompt input, and worth eyeballing before they
+		// reach a model.
+		fmt.Printf("\n%s\n%s\n", deps.Render(manifestFacts), body)
 		log.Printf("dry run: would upsert a sticky comment on %s/%s#%d",
 			prCtx.Owner, prCtx.Repo, prCtx.Number)
 		log.Printf("dry run: would create check run %q with conclusion %q", title, conclusion)
@@ -185,10 +192,10 @@ func loadModel(workspace string, cfg config.Config) (*model.Assertions, error) {
 	return model.LoadIn(workspace, paths[0])
 }
 
-// analyze runs the checks available in this build. Inference is not wired up
-// yet, so only the deterministic dependency comparison contributes findings —
-// and the report says so rather than implying full coverage.
-func analyze(cfg config.Config, assertions *model.Assertions, summary model.Summary,
+// analyze assembles the report for this build. Inference is not wired up yet
+// and nothing else produces findings, so the report is empty by construction —
+// what matters is that it says so rather than implying coverage it never had.
+func analyze(cfg config.Config, summary model.Summary,
 	filtered diff.Result, comparison *gh.CompareResult) (*findings.Report, render.ContextInfo) {
 
 	info := render.ContextInfo{
@@ -204,37 +211,18 @@ func analyze(cfg config.Config, assertions *model.Assertions, summary model.Summ
 		// of health — but a docs-only PR genuinely has no code to review.
 		NothingReviewed: len(filtered.Kept) == 0 && len(comparison.Changes) > filtered.Noise,
 		DiffTruncated:   len(comparison.Changes) > cfg.MaxDiffFiles,
-		AnalysisMode:    "deterministic checks only — inference is not enabled in this build",
+		AnalysisMode:    "none — inference is not enabled in this build, so no drift category was assessed",
 	}
 
+	// NoDrift stays false. Nothing here assesses drift: the engine parses the
+	// model, selects the diff, and extracts manifest facts for the prompt, but
+	// judging any of the six categories is the model's job. A report that
+	// found nothing because it looked for nothing must not read as clean.
 	report := &findings.Report{SchemaVersion: "0.1"}
-
-	if cfg.CategoryEnabled(string(findings.CategoryDependencyDrift)) {
-		found, omitted := deps.Analyze(filtered.Kept, deps.ModelDeps{
-			Path:       summary.Path,
-			AnchorLine: assertions.AnchorLine(),
-			Assertions: assertions.Dependencies(),
-		})
-		report.Findings = append(report.Findings, found...)
-		if omitted > 0 {
-			info.Notes = append(info.Notes,
-				fmt.Sprintf("%d further dependency finding(s) suppressed to keep this comment readable", omitted))
-		}
-	} else {
-		info.Notes = append(info.Notes, "dependency drift is disabled in .threatcl-ci.hcl")
-	}
-
-	// NoDrift stays false: dependency drift is one of six categories, and a
-	// clean deterministic pass is not evidence the model is consistent.
-	switch {
-	case info.NothingReviewed:
+	if info.NothingReviewed {
 		report.Summary = "No changed file was reviewed, so nothing was assessed. See the context below for why."
-	case len(report.Findings) == 0:
-		report.Summary = "Dependency checks found no drift. The other five drift categories were not assessed in this run."
-	default:
-		report.Summary = fmt.Sprintf(
-			"%d dependency drift finding(s). The other five drift categories were not assessed in this run.",
-			len(report.Findings))
+	} else {
+		report.Summary = "Inference is not enabled in this build, so no drift category was assessed."
 	}
 	return report, info
 }

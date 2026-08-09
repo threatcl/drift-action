@@ -44,8 +44,11 @@ shared with the claude-plugin (see `prompts/`):
    manifests, config files, paths the model references, plus configured
    trigger paths. Vendored and generated files are skipped. If nothing
    relevant changed, skip inference entirely. → `internal/diff`
-3. **Deterministic checks:** dependency drift via manifest parsing (`go.mod`,
-   `package.json`, …) — no LLM required.
+3. **Extract facts:** dependency manifests (`go.mod`, `package.json`, …) are
+   parsed into a statement of what changed — added, removed, version bumps,
+   with line numbers. These are facts for the prompt, not findings: whether an
+   undocumented dependency matters is judgement, and judgement belongs to the
+   model that reads the code. → `internal/deps`
 4. **Inference:** single-shot prompt (`prompts/drift-ci.md`) containing the
    model assertions + filtered diff + **targeted context stuffing** — the
    current contents of files that plausibly back controls/threats touched by
@@ -125,8 +128,8 @@ long tail.
   our code; inference output never influences tool calls or anything beyond
   the report body.
 - **Fork PRs:** default scaffolding uses `pull_request`, not
-  `pull_request_target` — fork PRs then get no secrets, and the action
-  degrades to deterministic-only checks with a neutral check run. Using
+  `pull_request_target` — fork PRs then get no secrets, so no review is
+  produced and the comment says so, with a neutral check run. Using
   `pull_request_target` to give fork PRs inference is the repo owner's choice;
   understand the secret-exposure risks first.
 - **Diff size limits:** hard cap with an explicit "diff too large, run locally

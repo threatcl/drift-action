@@ -27,8 +27,15 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   positional args (explicit rejection of threatcl-action's entrypoint.sh
   pattern).
 - **2026-08:** Deterministic-first pipeline. Parse model → filter diff →
-  deterministic checks → single-shot LLM with targeted context stuffing →
+  extract manifest facts → single-shot LLM with targeted context stuffing →
   render. No agentic repo exploration in v1.
+- **2026-08:** Deterministic code extracts facts; it does not produce findings.
+  `internal/deps` originally judged dependency drift itself — matching model
+  block names to module paths by fuzzy substring, assigning severities, writing
+  agent prompts. That duplicated what the model does better (it sees the same
+  manifest hunk), needed dedup once inference landed, and covered only two
+  ecosystems. It now reports what changed and leaves every judgement to the
+  model. Resist re-adding rule-based findings for any category.
 
 ## Hard constraints
 

@@ -45,30 +45,6 @@ func TestLineIndexUnknownAddressIsZero(t *testing.T) {
 	}
 }
 
-func TestAnchorLine(t *testing.T) {
-	a, err := Load("../../testdata/simple.tm.hcl")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	if got := a.AnchorLine(); got != 3 {
-		t.Errorf("AnchorLine = %d, want 3", got)
-	}
-}
-
-func TestDependencies(t *testing.T) {
-	a, err := Load("../../testdata/simple.tm.hcl")
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-	deps := a.Dependencies()
-	if len(deps) != 1 {
-		t.Fatalf("dependencies = %d, want 1", len(deps))
-	}
-	if deps[0].Name != "identity provider" || deps[0].Uptime != "degraded" || deps[0].Line != 23 {
-		t.Errorf("dependency = %+v", deps[0])
-	}
-}
-
 // Citations must be repo-relative: a runner-absolute path resolves to nothing
 // for a developer reading the PR.
 func TestLoadInKeepsRelativeSource(t *testing.T) {
