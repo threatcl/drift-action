@@ -1,6 +1,13 @@
 package config
 
-import "os"
+import (
+	"fmt"
+	"os"
+	"slices"
+	"strconv"
+
+	"github.com/threatcl/drift-action/internal/diff"
+)
 
 // Fail modes accepted in config and the fail-mode action input.
 const (
@@ -8,9 +15,11 @@ const (
 	FailOnActionRequired = "on-action-required"
 )
 
+// DefaultConfigPath is the repo-relative location of the drift config file.
+const DefaultConfigPath = ".threatcl-ci.hcl"
+
 // Config carries the engine's settings. Resolution order: Default, overlaid
-// by the repo's .threatcl-ci.hcl (parsing not yet implemented), overlaid by
-// action inputs via FromEnv.
+// by the repo's .threatcl-ci.hcl, overlaid by action inputs via FromEnv.
 type Config struct {
 	// ConfigPath is the repo-relative path to the .threatcl-ci.hcl file.
 	ConfigPath string
@@ -26,31 +35,46 @@ type Config struct {
 	// Provider and Model select the LLM backend.
 	Provider string
 	Model    string
+	// Effort is the model's reasoning effort: low | medium | high | xhigh | max.
+	Effort string
 	// APIKeyEnv names the environment variable holding the provider API key.
 	APIKeyEnv string
 	// MaxDiffFiles and MaxPatchBytes cap what is sent to inference; beyond
 	// them the run reports "diff too large" rather than silently truncating.
 	MaxDiffFiles  int
 	MaxPatchBytes int
+	// NarrowAbove is the changed-file count above which the diff is narrowed
+	// to security-relevant paths. Below it every non-noise file is reviewed.
+	NarrowAbove int
+	// DryRun suppresses every GitHub write. The diff is still fetched and the
+	// comment and check run are still rendered and logged — they are just
+	// never posted. It does not change the verdict or the exit code.
+	DryRun bool
 }
 
 func Default() Config {
 	return Config{
-		ConfigPath:    ".threatcl-ci.hcl",
+		ConfigPath:    DefaultConfigPath,
 		FailMode:      FailNever,
 		Provider:      "anthropic",
-		Model:         "claude-sonnet-5",
+		Model:         "claude-opus-5",
+		Effort:        "high",
 		APIKeyEnv:     "ANTHROPIC_API_KEY",
 		MaxDiffFiles:  200,
 		MaxPatchBytes: 400_000,
+		NarrowAbove:   diff.DefaultNarrowAbove,
 	}
 }
 
-// FromEnv overlays the GitHub Actions input env vars onto Default. Input env
+// DryRunEnv is a shell-friendly alias for the dry-run input. The action input
+// arrives as INPUT_DRY-RUN, and a hyphen cannot appear in a POSIX shell
+// variable name, so local runs would otherwise need `env "INPUT_DRY-RUN=true"`.
+const DryRunEnv = "THREATCL_DRIFT_DRY_RUN"
+
+// FromEnv overlays the GitHub Actions input env vars onto cfg. Input env
 // names contain hyphens (INPUT_CONFIG-PATH), which os.Getenv handles fine but
 // POSIX shells cannot reference.
-func FromEnv() Config {
-	c := Default()
+func (c Config) FromEnv() (Config, error) {
 	if v := os.Getenv("INPUT_CONFIG-PATH"); v != "" {
 		c.ConfigPath = v
 	}
@@ -60,5 +84,49 @@ func FromEnv() Config {
 	if v := os.Getenv("INPUT_MODEL"); v != "" {
 		c.Model = v
 	}
-	return c
+
+	dryRun, set, err := boolEnv("INPUT_DRY-RUN", DryRunEnv)
+	if err != nil {
+		return c, err
+	}
+	if set {
+		c.DryRun = dryRun
+	}
+	return c, nil
+}
+
+// FromEnv overlays the action inputs onto the built-in defaults. Callers that
+// also read a config file should use Default, LoadFile, then Config.FromEnv so
+// the inputs stay the highest-precedence layer.
+func FromEnv() (Config, error) {
+	return Default().FromEnv()
+}
+
+// boolEnv reads the first variable that is set among names. An unparseable
+// value is an error rather than a silent false: someone who sets
+// THREATCL_DRIFT_DRY_RUN=yes believes nothing will be posted, and quietly
+// posting a comment anyway is the worst thing this flag could do.
+func boolEnv(names ...string) (value, set bool, err error) {
+	for _, name := range names {
+		raw := os.Getenv(name)
+		if raw == "" {
+			continue
+		}
+		parsed, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			return false, false, fmt.Errorf(
+				"%s is %q, want a boolean (true or false)", name, raw)
+		}
+		return parsed, true, nil
+	}
+	return false, false, nil
+}
+
+// CategoryEnabled reports whether a drift category should be assessed. An
+// empty Categories list means all six are enabled.
+func (c Config) CategoryEnabled(category string) bool {
+	if len(c.Categories) == 0 {
+		return true
+	}
+	return slices.Contains(c.Categories, category)
 }

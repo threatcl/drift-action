@@ -61,6 +61,46 @@ jobs:
 | `github-token` | `${{ github.token }}` | Reads the PR diff, writes the comment/check |
 | `fail-mode` | from config | `never` \| `on-action-required` |
 | `model` | from config | Override the LLM model |
+| `dry-run` | `false` | Render and log the review without posting anything |
+
+### Trying it without posting
+
+`dry-run` fetches the diff and renders the full review, then prints it instead
+of writing to the pull request. Use it to trial the action on real PRs before
+letting it comment:
+
+```yaml
+- uses: threatcl/drift-action@main
+  with:
+    dry-run: true
+```
+
+Running the binary locally works the same way. The action input arrives as
+`INPUT_DRY-RUN`, and a hyphen cannot appear in a shell variable name, so there
+is a shell-friendly alias:
+
+```bash
+go build -o /tmp/drift-action ./cmd/drift-action
+
+gh pr view 210 --repo threatcl/threatcl \
+  --json number,baseRefOid,headRefOid \
+  --jq '{pull_request:{number:.number, base:{sha:.baseRefOid}, head:{sha:.headRefOid}}}' \
+  > /tmp/event.json
+
+THREATCL_DRIFT_DRY_RUN=true \
+GITHUB_REPOSITORY=threatcl/threatcl \
+GITHUB_EVENT_PATH=/tmp/event.json \
+GITHUB_WORKSPACE=/tmp/ws \
+GITHUB_TOKEN="$(gh auth token)" \
+RUNNER_TEMP=/tmp \
+/tmp/drift-action
+```
+
+A token is still required — the diff comes from the GitHub compare API — but
+no comment or check run is written. A value that is not a boolean is a hard
+error rather than a silent `false`, so a typo can never post a comment you
+thought you had suppressed. Dry run suppresses writes only; it does not change
+the verdict or the exit code.
 
 ### Outputs
 
@@ -69,13 +109,60 @@ jobs:
 | `findings-count` | Total drift findings |
 | `action-required-count` | Findings at the Action required tier |
 | `verdict` | `clean` \| `findings` \| `action-required` \| `skipped` \| `error` |
-| `report-path` | Workspace-relative path to the rendered report |
+| `report-path` | Path to the rendered markdown report (written under `RUNNER_TEMP`) |
 
 ### Configuration
 
-The long tail lives in a repo-level `.threatcl-ci.hcl` (design in
-[docs/phase1-plan.md](docs/phase1-plan.md)): threat model paths, enabled
-categories, extra trigger paths, fail mode, provider/model, diff size limits.
+The long tail lives in a repo-level `.threatcl-ci.hcl`. Every setting is
+optional — without the file, the action discovers a single `*.tm.hcl` at the
+repo root or under `threatmodels/` and uses the defaults below.
+
+```hcl
+# Which model to assess. Required only when the repo has more than one.
+model_paths = ["threatmodels/payments.hcl"]
+
+# Restrict the drift categories assessed. Omit to run all six.
+categories = ["phantom_control", "stale_assertion", "dependency_drift"]
+
+# Paths that must always be reviewed, even when a large diff is narrowed.
+# A trailing slash matches by prefix; otherwise the pattern is matched with
+# path.Match, and a bare filename matches wherever it sits in the tree.
+trigger_paths = ["src/payments/", "cmd/*.go"]
+
+# never (default) | on-action-required
+fail_mode = "never"
+
+llm {
+  provider    = "anthropic"
+  model       = "claude-opus-5"
+  effort      = "high" # low | medium | high | xhigh | max
+  api_key_env = "ANTHROPIC_API_KEY"
+}
+
+limits {
+  max_diff_files  = 200
+  max_patch_bytes = 400000
+  narrow_above    = 50
+}
+```
+
+An unknown category or fail mode is a hard error rather than a silent default,
+so a typo can never quietly disable a drift check.
+
+### What gets reviewed
+
+Two rules decide which changed files reach the review, and the comment always
+reports the outcome of both.
+
+Documentation, lock files, images, and vendored or generated code are always
+skipped — they cannot carry threat model drift. Dependency manifests
+(`go.mod`, `package.json`, …) are never skipped, whatever else the rules say.
+
+Everything else is reviewed. Only when a diff exceeds `narrow_above` files is
+it cut down to security-relevant paths to stay within budget, and when that
+happens the comment says how many files went unreviewed. The default is to
+keep a file, not to drop it: under-reviewing a PR produces a clean-looking
+result that hides real drift, which is the worst outcome this action has.
 
 ## Security notes
 

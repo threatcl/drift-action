@@ -25,6 +25,10 @@ inputs:
     description: 'Override the LLM model from config'
     required: false
     default: ''
+  dry-run:
+    description: 'Render the review and log it without posting the comment or check run'
+    required: false
+    default: 'false'
 outputs:
   findings-count:
     description: 'Total number of drift findings'
@@ -33,7 +37,7 @@ outputs:
   verdict:
     description: 'clean | findings | action-required | skipped | error'
   report-path:
-    description: 'Workspace-relative path to the rendered markdown report'
+    description: 'Path to the rendered markdown report (written under RUNNER_TEMP)'
 runs:
   using: 'docker'
   image: 'Dockerfile'

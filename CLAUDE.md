@@ -49,18 +49,45 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   comments on existing PRs.
 - **Docs and examples always use `pull_request`**, never
   `pull_request_target`.
+- **Diff filtering defaults to keep.** `internal/diff.Filter` removes only
+  noise (docs, lock files, vendored, generated), and narrows to
+  security-relevant paths *only* above `narrow_above`. An earlier version
+  inverted this — keeping just paths whose name contained a security keyword —
+  and silently discarded `server.go` and `store.go`, reviewing a real PR as
+  zero files. Under-reviewing yields a clean-looking result that hides drift,
+  the worst outcome this action has, so never tighten the filter without a
+  matching coverage report: narrowing and an empty review set must both reach
+  the comment.
 
 ## Gotchas
 
 - Action input env names contain hyphens (`INPUT_CONFIG-PATH`): fine from
-  `os.Getenv`, impossible from POSIX shell.
+  `os.Getenv`, impossible from POSIX shell. Inputs that need setting by hand
+  during local runs therefore get a shell-friendly alias — `dry-run` has
+  `THREATCL_DRIFT_DRY_RUN` (`config.DryRunEnv`).
+- `dry-run` suppresses every GitHub write and nothing else: the diff is still
+  fetched (so a token is still required), the comment is still rendered and
+  printed, and the verdict and exit code are unchanged. A non-boolean value is
+  a hard error, never a silent `false` — someone who believes they asked for a
+  dry run must never have a comment posted on their behalf.
 - `go.mod` requires go 1.26.5 — forced by the `threatcl/spec` dependency.
   Keep the Dockerfile's `golang:` base and spec bumps in sync.
 - Anthropic structured outputs don't support `minItems`, so "≥1 evidence per
   finding" cannot be enforced schema-side — that's why `findings.Sanitize`
   exists.
 - Structured-outputs model support is model-specific; default is
-  `claude-sonnet-5` (`internal/config`). Verify support before changing it.
+  `claude-opus-5` (`internal/config`). Verify support before changing it.
+- `threatcl/spec` discards source ranges: its structs carry no `hcl.Range` and
+  its `hclparse.Parser` is never returned. `internal/model.LineIndex` re-parses
+  the file with `hclsyntax` to recover line numbers, and joins to spec's
+  structs by block type and label. Without it, `model_excerpt.file:line`
+  cannot be produced and the evidence rule is unenforceable. An unknown line
+  is 0 and must render as "no line", never as `:0`.
+- Both `claude-opus-5` and `claude-sonnet-5` carry elevated cybersecurity
+  safeguards, and we send security-relevant diffs. A refusal arrives as
+  HTTP 200 with `stop_reason: "refusal"` and possibly an empty content array —
+  check the stop reason before reading content, and render a refusal as
+  "could not assess", never as "no drift".
 
 ## Open items
 

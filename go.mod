@@ -4,6 +4,8 @@ go 1.26.5
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.62.0
+	github.com/google/go-github/v75 v75.0.0
+	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/threatcl/spec v0.7.0
 )
 
@@ -60,6 +62,7 @@ require (
 	github.com/goccy/go-graphviz v0.2.10 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
+	github.com/google/go-querystring v1.1.0 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
@@ -70,7 +73,6 @@ require (
 	github.com/hashicorp/go-getter v1.8.6 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
-	github.com/hashicorp/hcl/v2 v2.24.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
 	github.com/klauspost/compress v1.18.5 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
