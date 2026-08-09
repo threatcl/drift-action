@@ -13,7 +13,7 @@ import (
 // schemaID identifies the embedded schema to the compiler. It is never
 // fetched: the document is supplied directly, and the 2020-12 metaschema ships
 // with the validator.
-const schemaID = "https://threatcl.io/schemas/findings-v0.schema.json"
+const schemaID = "https://threatcl.dev/schemas/findings-v0.schema.json"
 
 var (
 	schemaOnce     sync.Once
