@@ -25,12 +25,12 @@ func Facts(changes []diff.Change) []Delta {
 	return facts
 }
 
-// Render writes the deltas as a prompt section. Line numbers come from the
+// Render writes the deltas as the body of the prompt's dependency-manifest
+// section; the caller supplies the section header. Line numbers come from the
 // diff's post-image, so a finding built on one of these facts can cite
 // evidence the reader can actually open.
 func Render(facts []Delta) string {
 	var b strings.Builder
-	b.WriteString("### Dependency manifest changes\n\n")
 
 	if len(facts) == 0 {
 		// Say so explicitly. Silence invites the model to infer dependency

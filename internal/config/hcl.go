@@ -23,13 +23,15 @@ type llmBlock struct {
 	Provider  string `hcl:"provider,optional"`
 	Model     string `hcl:"model,optional"`
 	Effort    string `hcl:"effort,optional"`
+	MaxTokens int    `hcl:"max_tokens,optional"`
 	APIKeyEnv string `hcl:"api_key_env,optional"`
 }
 
 type limitsBlock struct {
-	MaxDiffFiles  int `hcl:"max_diff_files,optional"`
-	MaxPatchBytes int `hcl:"max_patch_bytes,optional"`
-	NarrowAbove   int `hcl:"narrow_above,optional"`
+	MaxDiffFiles    int `hcl:"max_diff_files,optional"`
+	MaxPatchBytes   int `hcl:"max_patch_bytes,optional"`
+	MaxContextBytes int `hcl:"max_context_bytes,optional"`
+	NarrowAbove     int `hcl:"narrow_above,optional"`
 }
 
 // LoadFile overlays the config file at path onto c. A missing file is not an
@@ -88,7 +90,15 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 			c.Model = fc.LLM.Model
 		}
 		if fc.LLM.Effort != "" {
+			if !knownEffort(fc.LLM.Effort) {
+				return c, fmt.Errorf(
+					"%s: llm.effort must be low, medium, high, xhigh or max, got %q",
+					path, fc.LLM.Effort)
+			}
 			c.Effort = fc.LLM.Effort
+		}
+		if fc.LLM.MaxTokens > 0 {
+			c.MaxTokens = fc.LLM.MaxTokens
 		}
 		if fc.LLM.APIKeyEnv != "" {
 			c.APIKeyEnv = fc.LLM.APIKeyEnv
@@ -101,11 +111,24 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 		if fc.Limits.MaxPatchBytes > 0 {
 			c.MaxPatchBytes = fc.Limits.MaxPatchBytes
 		}
+		if fc.Limits.MaxContextBytes > 0 {
+			c.MaxContextBytes = fc.Limits.MaxContextBytes
+		}
 		if fc.Limits.NarrowAbove > 0 {
 			c.NarrowAbove = fc.Limits.NarrowAbove
 		}
 	}
 	return c, nil
+}
+
+// knownEffort keeps a typo from reaching the API as a 400 mid-run, after the
+// diff has already been fetched.
+func knownEffort(effort string) bool {
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		return true
+	}
+	return false
 }
 
 // knownCategory keeps config typos from silently disabling a category. The

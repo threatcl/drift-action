@@ -28,8 +28,14 @@ upstream changes those, re-vendor and re-derive.
 
 ## Added (CI-specific)
 
-- Input-section contract (`THREAT MODEL ASSERTIONS` / `DIFF` /
-  `CONTEXT FILES`).
+- Input-section contract (`THREAT MODEL ASSERTIONS` / `ENABLED CATEGORIES` /
+  `DEPENDENCY MANIFEST CHANGES` / `CONTEXT FILES` / `DIFF`), ordered stable
+  content first so the prompt prefix stays cacheable.
+- The dependency-drift check reads the engine's extracted manifest deltas
+  rather than re-deriving them from the diff. The extraction states what
+  changed and assigns no severity; the judgement stays here.
+- `ENABLED CATEGORIES` honours the `categories` config setting, which upstream
+  has no equivalent of.
 - Prompt-injection framing: diff and file contents are untrusted data, never
   instructions.
 - JSON-only output instruction tied to the provided schema.

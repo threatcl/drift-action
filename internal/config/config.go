@@ -37,12 +37,17 @@ type Config struct {
 	Model    string
 	// Effort is the model's reasoning effort: low | medium | high | xhigh | max.
 	Effort string
+	// MaxTokens caps the model's output. It covers thinking as well as the
+	// findings array — too tight truncates the report mid-JSON.
+	MaxTokens int
 	// APIKeyEnv names the environment variable holding the provider API key.
 	APIKeyEnv string
 	// MaxDiffFiles and MaxPatchBytes cap what is sent to inference; beyond
 	// them the run reports "diff too large" rather than silently truncating.
 	MaxDiffFiles  int
 	MaxPatchBytes int
+	// MaxContextBytes caps the whole repo files sent alongside the diff.
+	MaxContextBytes int
 	// NarrowAbove is the changed-file count above which the diff is narrowed
 	// to security-relevant paths. Below it every non-noise file is reviewed.
 	NarrowAbove int
@@ -54,15 +59,17 @@ type Config struct {
 
 func Default() Config {
 	return Config{
-		ConfigPath:    DefaultConfigPath,
-		FailMode:      FailNever,
-		Provider:      "anthropic",
-		Model:         "claude-opus-5",
-		Effort:        "high",
-		APIKeyEnv:     "ANTHROPIC_API_KEY",
-		MaxDiffFiles:  200,
-		MaxPatchBytes: 400_000,
-		NarrowAbove:   diff.DefaultNarrowAbove,
+		ConfigPath:      DefaultConfigPath,
+		FailMode:        FailNever,
+		Provider:        "anthropic",
+		Model:           "claude-opus-5",
+		Effort:          "high",
+		MaxTokens:       32_000,
+		APIKeyEnv:       "ANTHROPIC_API_KEY",
+		MaxDiffFiles:    200,
+		MaxPatchBytes:   400_000,
+		MaxContextBytes: 200_000,
+		NarrowAbove:     diff.DefaultNarrowAbove,
 	}
 }
 

@@ -95,17 +95,41 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   HTTP 200 with `stop_reason: "refusal"` and possibly an empty content array —
   check the stop reason before reading content, and render a refusal as
   "could not assess", never as "no drift".
+- Server-side fallbacks are on by default (`fallbacks: "default"` plus the
+  `server-side-fallback-2026-07-01` beta), which puts the provider on the
+  **beta** message surface: `client.Beta.Messages.NewStreaming` and the whole
+  `Beta*` param/response family. The non-beta `MessageNewParams` has no
+  `Fallbacks` field. A fallback silently changes which model answered, so
+  `ReviewResult.Fallback` is detected from `usage.iterations` — the `fallback`
+  content block only marks a mid-response switch — and the comment names the
+  model that served the review.
+- `max_tokens` caps thinking *plus* output. Hitting it truncates the report
+  mid-JSON; that is an error, never a rendered half-review.
+- Inference error text never reaches the comment. A schema-validation failure
+  quotes the model's output, which the pull request's own diff shaped — so
+  `findings.ErrInvalidOutput` is matched and the engine supplies its own
+  wording, with the detail going to the run log. Model output reaches the
+  comment through the report body and nothing else.
+- `THREATCL_DRIFT_RECORD` / `THREATCL_DRIFT_REPLAY` (`internal/llm/fixture`)
+  capture and replay a review so the GitHub half of the pipeline can be tested
+  without paying for inference. Fixtures live in `testdata/recordings/`. A
+  replayed run must always disclose itself in the comment and must re-validate
+  the recorded report against the schema — a fixture is not trusted more than a
+  live response, and it must never be able to pass for one.
 
 ## State
 
-Milestone 1 is done: config parsing, threat model discovery and line indexing,
-assertion rendering, GitHub compare/comment/check-run client, diff filtering,
-manifest fact extraction, the comment renderer, and `dry-run`. The action runs
-end to end and produces **no findings by design** — nothing in it assesses
-drift yet, and the comment says exactly that.
+Milestones 1 and 2 are done. The action runs end to end and actually reviews:
+config parsing, model discovery and line indexing, assertion rendering, the
+GitHub compare/comment/check-run client, diff filtering and rendering, manifest
+fact extraction, targeted context stuffing, the Anthropic provider (streaming,
+forced JSON, refusal handling, server-side fallbacks), schema validation, the
+comment renderer, and `dry-run`.
 
-Milestone 2 is inference: `internal/llm/anthropic` currently returns
-`ErrNotImplemented`. See the plan file for the breakdown.
+Milestone 3 is polish and dogfooding: check-run conclusions wired to
+`fail_mode`, the diff-size cap with the "run locally" message, the
+`docker://` release switch, and the `testdata/` finding-quality corpus that
+tells us whether the engine is any good. See the plan file.
 
 ## Open items
 

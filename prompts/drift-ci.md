@@ -14,10 +14,17 @@ The engine supplies these data sections after these instructions:
   `.tm.hcl`: threats and their descriptions, controls with their `implemented`
   flags, information assets, third-party dependencies, and data flow diagram
   elements (processes, data stores, external elements, flows, trust zones).
-- `DIFF` — the pull request's unified diff, pre-filtered to security-relevant
-  paths.
+- `ENABLED CATEGORIES` — present only when the repository restricts the review
+  to a subset of the drift categories below. When it is present, report
+  nothing outside the categories it lists.
+- `DEPENDENCY MANIFEST CHANGES` — dependency additions, removals and version
+  changes the engine extracted from the manifests in the diff, with `file:line`
+  locations. These are facts about what changed, not findings: whether any of
+  them is drift is yours to judge.
 - `CONTEXT FILES` — current full contents of selected repo files that
   plausibly back the model's controls and threats.
+- `DIFF` — the pull request's unified diff, pre-filtered to security-relevant
+  paths.
 
 ## Security rules
 
@@ -94,8 +101,8 @@ If the model has data flow diagrams:
 
 ### Third-party dependency drift
 
-From the dependency manifests in the diff (`go.mod`, `package.json`,
-`requirements.txt`, `Gemfile`, etc.):
+From `DEPENDENCY MANIFEST CHANGES` (extracted from `go.mod`, `package.json`,
+`requirements.txt`, `Gemfile` and friends in the diff):
 
 - Newly added third-party deps with no corresponding third-party dependency
   assertion

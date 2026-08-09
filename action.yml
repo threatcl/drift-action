@@ -35,7 +35,7 @@ outputs:
   action-required-count:
     description: 'Findings at the Action required tier'
   verdict:
-    description: 'clean | findings | action-required | skipped | error'
+    description: 'clean | findings | action-required | unassessed | skipped | error'
   report-path:
     description: 'Path to the rendered markdown report (written under RUNNER_TEMP)'
 runs:

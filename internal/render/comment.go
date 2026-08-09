@@ -31,6 +31,9 @@ type ContextInfo struct {
 	// Narrowed and NarrowedOut report that the diff was too large to review
 	// whole and was cut to security-relevant paths — a coverage gap the
 	// reader has to see.
+	//
+	// Notes below carry their own "Label: detail" prefix from wherever they
+	// were raised, so every line in this block reads the same way.
 	Narrowed     bool
 	NarrowedOut  int
 	PatchOmitted int
@@ -125,18 +128,18 @@ func writeContext(b *strings.Builder, info ContextInfo) {
 		b.WriteString("\n")
 	}
 	if info.Narrowed {
-		fmt.Fprintf(b, "- ⚠️ Diff was too large to review whole: narrowed to security-relevant paths, leaving %d file(s) unreviewed\n",
+		fmt.Fprintf(b, "- ⚠️ Narrowing: the diff was too large to review whole, so it was cut to security-relevant paths, leaving %d file(s) unreviewed\n",
 			info.NarrowedOut)
 	}
 	if info.NothingReviewed {
-		b.WriteString("- ⚠️ No changed file was reviewed, so this run could not have found drift regardless of the code\n")
+		b.WriteString("- ⚠️ Coverage: no changed file was reviewed, so this run could not have found drift regardless of the code\n")
 	}
 	if info.PatchOmitted > 0 {
-		fmt.Fprintf(b, "- ⚠️ %d file(s) returned without a patch by the GitHub API (too large or binary) and were not analysed\n",
+		fmt.Fprintf(b, "- ⚠️ Missing patches: %d file(s) came back from the GitHub API without one, being too large or binary, and were not analysed\n",
 			info.PatchOmitted)
 	}
 	if info.DiffTruncated {
-		b.WriteString("- ⚠️ Diff exceeded the configured size limit. Run `/threat-drift` locally with the threatcl claude-plugin for full coverage.\n")
+		b.WriteString("- ⚠️ Size limit: the diff exceeded it, so run `/threat-drift` locally with the threatcl claude-plugin for full coverage\n")
 	}
 	if info.AnalysisMode != "" {
 		fmt.Fprintf(b, "- 🤖 Analysis: %s\n", info.AnalysisMode)

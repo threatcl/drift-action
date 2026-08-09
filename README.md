@@ -11,8 +11,9 @@ findings — the CI counterpart of the
 [threatcl claude-plugin](https://github.com/threatcl/claude-plugin)'s
 `/threat-drift` command.
 
-> **Status: pre-release skeleton.** The action interface, report schema, and
-> prompts are in place; the drift engine is not implemented yet. See
+> **Status: pre-release.** The engine runs end to end — it parses the model,
+> selects the diff, and reviews it — but the finding quality has not been
+> validated on a corpus yet, and the action is not tagged for release. See
 > [docs/phase1-plan.md](docs/phase1-plan.md).
 
 ## What it detects
@@ -102,14 +103,65 @@ error rather than a silent `false`, so a typo can never post a comment you
 thought you had suppressed. Dry run suppresses writes only; it does not change
 the verdict or the exit code.
 
+### Testing without paying for inference
+
+Iterating on the GitHub half of the pipeline — comment upsert, sticky updates,
+check runs, outputs — means running the action over and over, and each run is
+a paid review of the same unchanged diff. Record one review, then replay it:
+
+```bash
+# Once, with a key: run the review and write it out on the way past.
+THREATCL_DRIFT_RECORD=testdata/recordings/my-pr.json … /tmp/drift-action
+
+# Thereafter, free and offline. No API key needed.
+THREATCL_DRIFT_REPLAY=testdata/recordings/my-pr.json … /tmp/drift-action
+```
+
+A replayed run says so in the comment's "Analysis" line, and the recording
+carries the pull request and head SHA it came from plus a fingerprint of the
+prompt it was recorded against — so replaying over a diff that has since moved
+on is reported rather than passed off as a fresh review. The recorded report is
+re-validated against the schema on the way out, exactly as a live response is.
+
+This is a local testing affordance. Do not wire either variable into a real
+workflow: a replayed review says nothing about the pull request in front of it.
+See [`testdata/recordings/`](testdata/recordings/).
+
+[`hack/dry-run.sh`](hack/dry-run.sh) wires all of this together against a real
+pull request — it resolves the base and head SHAs, fetches the head tree through
+the GitHub API (nothing is cloned into your working copy), builds, and runs:
+
+```bash
+hack/dry-run.sh                    # replay the committed recording, post nothing
+hack/dry-run.sh --live             # call the model (needs ANTHROPIC_API_KEY)
+hack/dry-run.sh --live --record    # re-record the fixture while reviewing
+hack/dry-run.sh --post             # actually write the comment and check run
+
+PR=owner/repo#7 hack/dry-run.sh    # target a different pull request
+```
+
+Two things differ when driving the binary by hand rather than from a workflow.
+Check runs can only be created by a GitHub App, so a personal access token gets
+`403 You must authenticate via a GitHub App` — the comment still posts, and the
+run logs the check run as a warning rather than failing, exactly as it does for
+a fork PR's read-only token. Under Actions, `GITHUB_TOKEN` is an app
+installation token and `checks: write` works.
+
 ### Outputs
 
 | Output | Description |
 |--------|-------------|
 | `findings-count` | Total drift findings |
 | `action-required-count` | Findings at the Action required tier |
-| `verdict` | `clean` \| `findings` \| `action-required` \| `skipped` \| `error` |
+| `verdict` | `clean` \| `findings` \| `action-required` \| `unassessed` \| `skipped` \| `error` |
 | `report-path` | Path to the rendered markdown report (written under `RUNNER_TEMP`) |
+
+`clean` is reserved for a run where the model actually assessed the change and
+found it consistent. A run that produced no findings because it assessed
+nothing — no API key, no reviewable file, a refused request — reports
+`unassessed`, so a workflow gating on this output cannot mistake silence for
+safety. `skipped` means the run did not apply at all (no pull request, or no
+threat model in the repo); `error` means the action itself failed.
 
 ### Configuration
 
@@ -136,18 +188,25 @@ llm {
   provider    = "anthropic"
   model       = "claude-opus-5"
   effort      = "high" # low | medium | high | xhigh | max
+  max_tokens  = 32000  # covers thinking as well as the findings array
   api_key_env = "ANTHROPIC_API_KEY"
 }
 
 limits {
-  max_diff_files  = 200
-  max_patch_bytes = 400000
-  narrow_above    = 50
+  max_diff_files    = 200
+  max_patch_bytes   = 400000 # cap on the rendered diff
+  max_context_bytes = 200000 # cap on whole files sent alongside it
+  narrow_above      = 50
 }
 ```
 
-An unknown category or fail mode is a hard error rather than a silent default,
-so a typo can never quietly disable a drift check.
+An unknown category, fail mode or effort level is a hard error rather than a
+silent default, so a typo can never quietly disable a drift check or fail the
+request after the diff has already been fetched.
+
+`max_tokens` bounds the model's output *including* its thinking. Too tight and
+the report is truncated mid-JSON, which the run reports as an error rather than
+rendering a half-written review.
 
 ### What gets reviewed
 
@@ -173,6 +232,12 @@ result that hides real drift, which is the worst outcome this action has.
 - PR content is treated as data, never instructions; the LLM's output is
   forced into a JSON schema and influences nothing but the report body, and
   findings without code evidence are discarded.
+- The models this action uses carry elevated cybersecurity safeguards, and it
+  sends security-relevant diffs and asks what attack surface they introduce.
+  A declined request is re-served on a fallback model automatically, and the
+  comment names the model that answered when that happens. If the review
+  cannot be produced at all, the comment says the change could not be
+  assessed — never that there is no drift.
 - Self-hosted by design: your code and threat model go only to the LLM
   provider you configure, under your own key — never to threatcl.
 

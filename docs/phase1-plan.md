@@ -1,6 +1,8 @@
 # drift-action — Phase 1 plan
 
-**Status:** skeleton committed, engine not yet implemented.
+**Status:** the pipeline below runs end to end, inference included. What is
+left is validating finding quality on a corpus, wiring the check-run
+conclusion to `fail_mode`, and cutting a release.
 
 ## What this is
 

@@ -1,0 +1,101 @@
+{
+  "recorded_at": "2026-08-09T00:00:00Z",
+  "source": "threatcl/growud-test#1@44fa877cef57a53c818bb4f20371d60217cbf550",
+  "model": "claude-opus-5",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Three findings: the new unauthenticated /api/export endpoint dumps the entire readings history as CSV and is not represented anywhere in the threat model (highest priority), plus a stale input-validation control claim and a missing DFD flow.",
+    "findings": [
+      {
+        "category": "unmodeled_surface",
+        "severity": "action_required",
+        "title": "New unauthenticated /api/export endpoint bulk-exports the whole readings database",
+        "model_excerpt": {
+          "file": "growud.tm.hcl",
+          "line": 127,
+          "quote": "GROWUD_BIND / -bind allows binding the dashboard to 0.0.0.0. The dashboard has no authentication, no CSRF protection, and no rate limiting. Anyone reachable on the network can read live energy data via /api/summary, query historical readings via /api/readings, retrieve computed grid import cost / export credit via /api/cost ..."
+        },
+        "evidence": [
+          {
+            "file": "server/server.go",
+            "line": 63,
+            "note": "New route registered: mux.HandleFunc(\"/api/export\", s.handleAPIExport) — no auth middleware on the mux"
+          },
+          {
+            "file": "server/server.go",
+            "line": 468,
+            "note": "handleAPIExport streams every stored reading as CSV; with no ?device= it exports all devices"
+          },
+          {
+            "file": "growatt/store.go",
+            "line": 437,
+            "note": "ExportAllReadings returns every row in the readings table (no date bounding or row limit)"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The threat that enumerates the unauthenticated read surface omits a new endpoint that exfiltrates the entire energy-readings-db in one request."
+        },
+        "agent_prompt": "Update growud.tm.hcl: the threat \"Web dashboard bound to all interfaces exposes data and triggers Growatt API calls without authentication\" (around line 127) enumerates /api/summary, /api/readings and /api/cost as the unauthenticated read surface. This PR added a new route /api/export (server/server.go: mux.HandleFunc(\"/api/export\", s.handleAPIExport) and func handleAPIExport) backed by growatt/store.go ExportAllReadings, which streams the complete readings history for all devices as CSV with no authentication, no row limit and no date bounding. Extend that threat's description to include /api/export and note it is a full-database bulk export (highest-value target on the unauthenticated surface), keep information_asset \"energy-readings-db\" listed, and update the proposed control \"Add an authentication layer (or refuse to bind non-loopback without it)\" to explicitly cover /api/export (auth + rate limiting or row/date bounding).",
+        "suggested_fix": "Add /api/export to the unauthenticated-dashboard threat description and to the proposed auth/rate-limit control in growud.tm.hcl."
+      },
+      {
+        "category": "stale_assertion",
+        "severity": "review_recommended",
+        "title": "'Strict regex validation on date and device-SN inputs' no longer covers all query-parameter-driven endpoints",
+        "model_excerpt": {
+          "file": "growud.tm.hcl",
+          "line": 229,
+          "quote": "server.go validates date with ^\\d{4}-\\d{2}-\\d{2}$ and device with ^[A-Za-z0-9_-]{1,64}$, then time.Parse-checks the date. Applied uniformly to /api/readings and /api/cost (from/to/device). Store queries use parameterised SQL via database/sql, including QueryRangeReadings used by the cost calculator."
+        },
+        "evidence": [
+          {
+            "file": "server/server.go",
+            "line": 476,
+            "note": "handleAPIExport reads r.URL.Query().Get(\"device\") and passes it straight to the store without deviceSNRe.MatchString validation"
+          },
+          {
+            "file": "growatt/store.go",
+            "line": 437,
+            "note": "ExportAllReadings interpolates no user data (uses ? placeholder), so SQL injection is not introduced, but the model's 'uniform validation' claim is now inaccurate"
+          }
+        ],
+        "relevance": {
+          "rating": "moderate",
+          "justification": "The control is still true for the endpoints it names, but a new query-parameter-driven endpoint bypasses the validation the model presents as uniform."
+        },
+        "agent_prompt": "Update growud.tm.hcl: the control \"Strict regex validation on date and device-SN inputs\" (implemented = true, around line 229) under the threat \"Untrusted query parameters drive database / cost queries\" claims validation is applied uniformly to the query-parameter endpoints. The new /api/export handler added in this PR (server/server.go handleAPIExport) reads the `device` query parameter and passes it to growatt/store.go ExportAllReadings without applying deviceSNRe. Either amend the control description to state that /api/export relies solely on parameterised SQL (no regex validation) and note the gap, or better, add deviceSNRe validation to handleAPIExport and update the description to list /api/export alongside /api/readings and /api/cost.",
+        "suggested_fix": "Amend the input-validation control description in growud.tm.hcl to cover (or exclude) /api/export's unvalidated `device` parameter."
+      },
+      {
+        "category": "dfd_drift",
+        "severity": "review_recommended",
+        "title": "DFD has no flow for the CSV export of energy-readings-db back to the user",
+        "model_excerpt": {
+          "file": "growud.tm.hcl",
+          "line": 255,
+          "quote": "flow \"query readings\": Web Dashboard (HTTP) -> SQLite DB (growud.db)"
+        },
+        "evidence": [
+          {
+            "file": "server/server.go",
+            "line": 468,
+            "note": "handleAPIExport writes a full CSV of all readings to the HTTP response (Content-Disposition attachment)"
+          },
+          {
+            "file": "growatt/store.go",
+            "line": 437,
+            "note": "New store method ExportAllReadings supplies the bulk data set for the export flow"
+          }
+        ],
+        "relevance": {
+          "rating": "moderate",
+          "justification": "A new bulk data egress path from the SQLite store through the dashboard to the requester is not represented in the DFD."
+        },
+        "agent_prompt": "Update the data_flow_diagram_v2 \"Growud\" block in growud.tm.hcl (around line 255): add a flow representing the new bulk CSV export introduced in this PR — Web Dashboard (HTTP) -> SQLite DB (growud.db) named something like \"export all readings\" (backed by growatt/store.go ExportAllReadings) and a corresponding response flow Web Dashboard (HTTP) -> User named \"CSV export (all readings)\" carrying information_asset \"energy-readings-db\", so the DFD shows the full-history egress path added by server/server.go handleAPIExport.",
+        "suggested_fix": "Add \"export all readings\" and \"CSV export\" flows to the DFD in growud.tm.hcl covering energy-readings-db egress via /api/export."
+      }
+    ]
+  }
+}
