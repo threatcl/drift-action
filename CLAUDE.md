@@ -96,16 +96,25 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   check the stop reason before reading content, and render a refusal as
   "could not assess", never as "no drift".
 
+## State
+
+Milestone 1 is done: config parsing, threat model discovery and line indexing,
+assertion rendering, GitHub compare/comment/check-run client, diff filtering,
+manifest fact extraction, the comment renderer, and `dry-run`. The action runs
+end to end and produces **no findings by design** — nothing in it assesses
+drift yet, and the comment says exactly that.
+
+Milestone 2 is inference: `internal/llm/anthropic` currently returns
+`ErrNotImplemented`. See the plan file for the breakdown.
+
 ## Open items
 
-- LICENSE: none yet, intentionally — repo is private and the open/closed
-  question is unsettled. MIT is the family default (threatcl-action is MIT).
-  Resolve `threatcl/spec`'s missing LICENSE before anything here goes public.
+- `threatcl/spec` has no LICENSE file. It is a direct dependency, so resolve
+  that before this repo is made public.
 - Config file name `.threatcl-ci.hcl`: coordinate with the claude-plugin's
   `/threat-ci` scaffolder before first release.
-- Engine implementation: compare-API client, manifest-based dependency drift,
-  targeted context stuffing, Anthropic structured-output call, full comment
-  renderer.
+- No repo in the org has a root-level `.tm.hcl` yet, so dogfooding needs one
+  added (or `model_paths` pointed at an existing model).
 
 ## Siblings
 
