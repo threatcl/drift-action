@@ -1,0 +1,12 @@
+{
+  "recorded_at": "2026-08-10T22:16:29Z",
+  "source": "corpus/clean",
+  "model": "claude-opus-5",
+  "request_digest": "9d161d35787d1c226b7e0cf5da36233d02805199c6c3df5c99aa4504413488be",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": true,
+    "summary": "No drift detected. The only change is a logging timestamp format tweak in internal/log/log.go, which does not touch the rate-limiting control, the /login endpoint, or the user credentials asset asserted in app.tm.hcl.",
+    "findings": []
+  }
+}

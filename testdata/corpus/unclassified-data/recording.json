@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-08-10T22:18:11Z",
+  "source": "corpus/unclassified-data",
+  "model": "claude-opus-5",
+  "request_digest": "c1b18078e9a528c9884a4c05b689c428d68e191775e26ced7dcab0ee10b6c2f4",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "One review_recommended finding: the profile response now returns tax ID and date of birth, PII that no information asset in app.tm.hcl classifies.",
+    "findings": [
+      {
+        "category": "unclassified_data",
+        "severity": "review_recommended",
+        "title": "Profile API now returns tax ID and date of birth with no matching information asset",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "information_asset \"user credentials\" classification=Restricted — Usernames and password hashes in the users table"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 11,
+            "note": "profileResponse struct gains TaxID and DateOfBirth JSON fields"
+          },
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 22,
+            "note": "profileHandler now serializes u.TaxID and u.DateOfBirth into the GET /profile response body"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "Tax ID and date of birth are personal data returned over an authenticated endpoint, and the model's only information asset covers credentials, so the new data is unclassified."
+        },
+        "agent_prompt": "Update app.tm.hcl for the login service threat model. The GET /profile response in internal/httpapi/user.go was changed in this PR to include two new personal-data fields: TaxID (json \"tax_id\") and DateOfBirth (json \"date_of_birth\") on profileResponse (lines ~11 and ~22). The model currently declares only one information_asset, \"user credentials\" (Usernames and password hashes in the users table, classification Restricted) at app.tm.hcl:7. Add a new information_asset block — e.g. information_asset \"user pii\" with description \"Tax identification number and date of birth returned by GET /profile\" and an appropriate classification (Restricted or Confidential per your scheme) — and update the description of threat \"session hijacking\" (app.tm.hcl:12) to note that a replayed session token now exposes this PII in addition to profile identity, so the Confidentiality impact reflects the wider blast radius.",
+        "suggested_fix": "Add an information_asset block for tax ID / date of birth PII and reference it in the session hijacking threat description."
+      }
+    ]
+  }
+}

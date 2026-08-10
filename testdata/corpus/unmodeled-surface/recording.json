@@ -1,0 +1,69 @@
+{
+  "recorded_at": "2026-08-10T22:18:32Z",
+  "source": "corpus/unmodeled-surface",
+  "model": "claude-opus-5",
+  "request_digest": "983f9d45713522d5c2dd85ac251df20cfcf47b3d999f45714cb3245411e330a9",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Two findings: an unauthenticated GET /admin/export endpoint that bulk-exports user rows is entirely unmodeled (action required), plus user email addresses exported with no matching information asset.",
+    "findings": [
+      {
+        "category": "unmodeled_surface",
+        "severity": "action_required",
+        "title": "New GET /admin/export endpoint bulk-exports user rows and is absent from the model",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 3,
+          "quote": "Login service exposing POST /login and GET /profile"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 9,
+            "note": "New route mux.Handle(\"GET /admin/export\", exportHandler(store)) registered without the requireSession wrapper used for GET /profile"
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 9,
+            "note": "exportHandler streams every user row (id, email, created_at) as CSV with no authentication or authorization check"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The model explicitly enumerates only POST /login and GET /profile; the diff adds a third, unauthenticated route that exposes the whole user table."
+        },
+        "agent_prompt": "Update app.tm.hcl for the 'login service' threat model. The PR adds a new route GET /admin/export (internal/httpapi/routes.go line 9) served by exportHandler in internal/httpapi/export.go, which streams every user row (id, email, created_at) as CSV. Unlike GET /profile, this route is NOT wrapped in requireSession, so it currently has no authentication or authorization. (1) Amend the threat model description to list the new endpoint alongside POST /login and GET /profile. (2) Add a new threat block, e.g. threat \"unauthenticated bulk user export\" with stride = [\"Information Disclosure\", \"Elevation of Privilege\"], impacts = [\"Confidentiality\"], description referencing GET /admin/export and internal/httpapi/export.go. (3) Add a control under that threat for admin authentication/authorization on /admin/export with implemented = false until the handler is wrapped in requireSession plus an admin role check.",
+        "suggested_fix": "Add a threat + not-implemented admin-authz control for GET /admin/export and list the endpoint in the model description."
+      },
+      {
+        "category": "unclassified_data",
+        "severity": "review_recommended",
+        "title": "Exported user email addresses and creation timestamps are not covered by any information asset",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "information_asset \"user credentials\" classification=Restricted — Usernames and password hashes in the users table"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 14,
+            "note": "CSV header writes \"id\", \"email\", \"created_at\" — email is personal data"
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 16,
+            "note": "Loop emits u.Email and u.CreatedAt for every user in the store"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The only declared asset covers usernames and password hashes; user email addresses now leave the system in bulk with no classification."
+        },
+        "agent_prompt": "Update app.tm.hcl: the PR's new export handler (internal/httpapi/export.go lines 14-17) emits user id, email and created_at for every user, but the only information_asset declared is \"user credentials\" (usernames and password hashes). Add an information_asset block, e.g. information_asset \"user contact data\" with classification = \"Confidential\" (or the repo's PII classification) and a description naming email addresses and account creation timestamps exposed via GET /admin/export, and reference it from the export-related threat.",
+        "suggested_fix": "Add an information_asset covering user email addresses / account metadata exposed by the CSV export."
+      }
+    ]
+  }
+}
