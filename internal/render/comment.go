@@ -44,7 +44,10 @@ type ContextInfo struct {
 	// run: even after filtering, more files needed review than the cap allows,
 	// so none were sent to inference. The cap is all-or-nothing — reviewing a
 	// subset would present partial coverage as a review.
-	OverCap      int
+	OverCap int
+	// Replayed means no model ran in this build: the findings were replayed
+	// from a recording and describe the diff it was made from, not this one.
+	Replayed     bool
 	AnalysisMode string
 	Notes        []string
 }
@@ -73,10 +76,50 @@ func Comment(report *findings.Report, info ContextInfo) string {
 
 	writeCounts(&b, report)
 	writeVerdict(&b, report)
+	writeWarnings(&b, info)
 	writeContext(&b, info)
 	writeFindings(&b, report)
 
 	return b.String()
+}
+
+// writeWarnings renders every coverage gap above the fold, before the
+// collapsed "Context used" block. Narrowing, an empty review set, missing
+// patches, the size cap and a replayed review all change what the findings
+// below are worth — a reader who never expands a <details> still has to see
+// them.
+func writeWarnings(b *strings.Builder, info ContextInfo) {
+	var lines []string
+	if info.Narrowed {
+		lines = append(lines, fmt.Sprintf(
+			"⚠️ Narrowing: the diff was too large to review whole, so it was cut to security-relevant paths, leaving %d file(s) unreviewed",
+			info.NarrowedOut))
+	}
+	if info.NothingReviewed {
+		lines = append(lines,
+			"⚠️ Coverage: no changed file was reviewed, so this run could not have found drift regardless of the code")
+	}
+	if info.PatchOmitted > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"⚠️ Missing patches: %d file(s) came back from the GitHub API without one, being too large or binary, and were not analysed",
+			info.PatchOmitted))
+	}
+	if info.OverCap > 0 {
+		lines = append(lines, fmt.Sprintf(
+			"⚠️ Size limit: %d file(s) needed review but `max_diff_files` is %d, so no review ran — run `/threat-drift` locally with the threatcl claude-plugin for full coverage",
+			info.FilesReviewed, info.OverCap))
+	}
+	if info.Replayed {
+		lines = append(lines,
+			"⚠️ Replayed review: no model ran in this build — these findings come from a recording, not from this diff")
+	}
+	if len(lines) == 0 {
+		return
+	}
+	for _, line := range lines {
+		fmt.Fprintf(b, "- %s\n", line)
+	}
+	b.WriteString("\n")
 }
 
 func writeCounts(b *strings.Builder, report *findings.Report) {
@@ -136,21 +179,8 @@ func writeContext(b *strings.Builder, info ContextInfo) {
 		}
 		b.WriteString("\n")
 	}
-	if info.Narrowed {
-		fmt.Fprintf(b, "- ⚠️ Narrowing: the diff was too large to review whole, so it was cut to security-relevant paths, leaving %d file(s) unreviewed\n",
-			info.NarrowedOut)
-	}
-	if info.NothingReviewed {
-		b.WriteString("- ⚠️ Coverage: no changed file was reviewed, so this run could not have found drift regardless of the code\n")
-	}
-	if info.PatchOmitted > 0 {
-		fmt.Fprintf(b, "- ⚠️ Missing patches: %d file(s) came back from the GitHub API without one, being too large or binary, and were not analysed\n",
-			info.PatchOmitted)
-	}
-	if info.OverCap > 0 {
-		fmt.Fprintf(b, "- ⚠️ Size limit: %d file(s) needed review but `max_diff_files` is %d, so no review ran — run `/threat-drift` locally with the threatcl claude-plugin for full coverage\n",
-			info.FilesReviewed, info.OverCap)
-	}
+	// Coverage warnings render above the fold in writeWarnings, not here — a
+	// collapsed block must never be the only place a gap is disclosed.
 	if info.AnalysisMode != "" {
 		fmt.Fprintf(b, "- 🤖 Analysis: %s\n", info.AnalysisMode)
 	}

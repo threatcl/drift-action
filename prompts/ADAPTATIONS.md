@@ -40,6 +40,17 @@ upstream changes those, re-vendor and re-derive.
   instructions.
 - JSON-only output instruction tied to the provided schema.
 - Severity-tier defaults (contradicted assertions and phantom controls →
-  `action_required`).
+  `action_required`), plus a partial-contradiction rule upstream doesn't
+  need: an assertion that is still true but now incomplete is
+  `review_recommended`, never `action_required`. Two identical runs scored
+  the same partially-contradicted assertion differently, which flips
+  `action-required-count` and can flip the build under
+  `fail_mode = "on-action-required"` — the plugin has no build to fail, so
+  the rule is CI-only.
+- `CONTEXT FILES` lines carry `N→` line-number prefixes, with instructions
+  to cite the printed number and to strip the prefix when quoting.
+  Upstream runs inside Claude Code where the model reads files with
+  numbered lines natively; single-shot CI observed citations landing 1–3
+  lines off when the model did its own arithmetic.
 - Per-finding `agent_prompt` and `relevance` field guidance (from the PR
   output spec).

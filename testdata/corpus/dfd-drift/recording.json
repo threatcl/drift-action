@@ -1,134 +1,134 @@
 {
-  "recorded_at": "2026-08-10T22:17:30Z",
+  "recorded_at": "2026-08-10T22:29:48Z",
   "source": "corpus/dfd-drift",
   "model": "claude-opus-5",
   "request_digest": "1144b20f70ed1ef70ad690ca498a55e685a7dfad1047ccc0d677f7ec3e06b796",
   "report": {
     "schema_version": "0.1",
     "no_drift": false,
-    "summary": "Three findings: highest priority is a new unmodeled egress of Confidential order data (customer email) to a third-party hosted analytics collector that has no external element, flow, or third-party dependency in the checkout DFD.",
+    "summary": "Four findings: the PR ships customer emails to an unmodeled third-party analytics endpoint (action_required), plus DFD, dependency and information-asset scope drift.",
     "findings": [
       {
-        "category": "dfd_drift",
+        "category": "unmodeled_surface",
         "severity": "action_required",
-        "title": "New external analytics collector and outbound flow missing from the 'checkout' DFD",
+        "title": "Confidential order data sent to an external analytics service not represented in the model",
         "model_excerpt": {
           "file": "app.tm.hcl",
           "line": 23,
-          "quote": "data_flow_diagram_v2 \"checkout\" { process \"Web App\"; external_element \"Customer\"; data_store \"Orders Database\"; flow \"https\": Customer -\u003e Web App; flow \"sql\": Web App -\u003e Orders Database }"
+          "quote": "data_flow_diagram_v2 \"checkout\" { process \"Web App\"; external_element \"Customer\"; data_store \"Orders Database\" }"
         },
         "evidence": [
           {
             "file": "internal/orders/analytics.go",
             "line": 9,
-            "note": "New constant analyticsURL points at https://collector.example-analytics.com/v1/events, an external host absent from the DFD"
+            "note": "New outbound endpoint constant analyticsURL = https://collector.example-analytics.com/v1/events"
+          },
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 17,
+            "note": "Payload includes \"email\": o.CustomerEmail and order amount"
           },
           {
             "file": "internal/orders/analytics.go",
             "line": 22,
-            "note": "http.Post sends order events out of the service — a new outbound flow crossing the trust boundary"
+            "note": "http.Post sends the payload to the third-party collector"
           },
           {
             "file": "internal/orders/orders.go",
             "line": 8,
-            "note": "Store.Create now invokes publishAnalytics on every order creation, so the flow is on the primary checkout path"
+            "note": "Store.Create now calls publishAnalytics(o) on every order creation"
           }
         ],
         "relevance": {
           "rating": "strong",
-          "justification": "The DFD enumerates exactly three nodes and two flows; the diff introduces a third-party destination and a new outbound flow that the diagram does not contain."
+          "justification": "The model's only egress from Web App is the SQL flow to the Orders Database; this PR adds an unmodeled egress of Confidential PII to an external host."
         },
-        "agent_prompt": "Update app.tm.hcl: in the data_flow_diagram_v2 \"checkout\" block, add an external_element for the hosted analytics collector (https://collector.example-analytics.com/v1/events, referenced at internal/orders/analytics.go:9) and a flow from process \"Web App\" to that external element named e.g. \"analytics-events\", with information_asset = \"order-history\" since the payload includes o.CustomerEmail and o.AmountCents (internal/orders/analytics.go:13-18). This flow was added in this PR by publishAnalytics, called from Store.Create at internal/orders/orders.go:8.",
-        "suggested_fix": "Add an external_element for the analytics collector and a Web App -\u003e collector flow carrying 'order-history' to the checkout DFD."
+        "agent_prompt": "Update app.tm.hcl for the checkout service threat model. This PR added internal/orders/analytics.go, which POSTs order events containing o.CustomerEmail and o.AmountCents to https://collector.example-analytics.com/v1/events, called from Store.Create in internal/orders/orders.go. Add a threat block covering disclosure of Confidential order-history data to the hosted analytics provider (STRIDE Info Disclosure, impacts Confidentiality), and attach controls describing what actually protects that egress (TLS, field minimisation/redaction of email, or a data-processing agreement) with accurate implemented flags based on the code.",
+        "suggested_fix": "Add a threat (Info Disclosure) for order PII egress to the hosted analytics collector, with controls reflecting what the code actually does."
+      },
+      {
+        "category": "dfd_drift",
+        "severity": "review_recommended",
+        "title": "DFD lacks an external element and flow for the analytics collector",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 23,
+          "quote": "flow \"https\": Customer -\u003e Web App; flow \"sql\": Web App -\u003e Orders Database"
+        },
+        "evidence": [
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 22,
+            "note": "New Web App -\u003e external analytics HTTPS flow crossing the service's trust boundary"
+          },
+          {
+            "file": "internal/orders/orders.go",
+            "line": 8,
+            "note": "Flow is exercised on the order-creation path, not an optional side channel"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "A new trust-boundary-crossing data flow exists in code with no corresponding DFD element or flow."
+        },
+        "agent_prompt": "In app.tm.hcl, extend the data_flow_diagram_v2 \"checkout\" block: add an external_element named \"Analytics Collector\" (collector.example-analytics.com) outside the application trust zone, and a flow \"analytics-events\" from \"Web App\" to \"Analytics Collector\" carrying the information_asset \"order-history\". Motivation: internal/orders/analytics.go line 22 http.Posts order events (email, amount) to that host from Store.Create in internal/orders/orders.go line 8.",
+        "suggested_fix": "Add external_element \"Analytics Collector\" and flow \"analytics-events\" (Web App -\u003e Analytics Collector) carrying order-history to the checkout DFD."
       },
       {
         "category": "dependency_drift",
-        "severity": "action_required",
-        "title": "Hosted analytics service is a new third-party data processor with no third_party_dependency assertion",
+        "severity": "review_recommended",
+        "title": "New third-party analytics processor with no third_party_dependency assertion",
         "model_excerpt": {
           "file": "app.tm.hcl",
           "line": 3,
-          "quote": "threat_model \"checkout service\" { ... } // no third_party_dependency blocks declared"
+          "quote": "threat_model \"checkout service\" { ... }  // no third_party_dependency blocks"
         },
         "evidence": [
           {
             "file": "internal/orders/analytics.go",
             "line": 9,
-            "note": "Code calls an externally hosted SaaS endpoint (collector.example-analytics.com) not declared anywhere in the model"
-          },
-          {
-            "file": "internal/orders/analytics.go",
-            "line": 16,
-            "note": "Confidential customer email is included in the payload sent to that third party"
-          }
-        ],
-        "relevance": {
-          "rating": "strong",
-          "justification": "The model declares zero third-party dependencies, yet the service now transmits confidential customer data to an external vendor on every order."
-        },
-        "agent_prompt": "Update app.tm.hcl: add a third_party_dependency block for the hosted analytics service at https://collector.example-analytics.com/v1/events (introduced in internal/orders/analytics.go:9-23). Describe that order events containing customer email addresses and amounts are transmitted to it, reference information_asset \"order-history\", and set uptime_dependency appropriately (the call is best-effort — failures are only logged at internal/orders/orders.go:9).",
-        "suggested_fix": "Add a third_party_dependency block for the hosted analytics collector, noting it receives 'order-history' data."
-      },
-      {
-        "category": "stale_assertion",
-        "severity": "action_required",
-        "title": "'order-history' asset and 'order database exposure' threat assume order data stays in the database",
-        "model_excerpt": {
-          "file": "app.tm.hcl",
-          "line": 7,
-          "quote": "information_asset \"order-history\" classification=Confidential — Customer orders, including email addresses and amounts, in the orders database"
-        },
-        "evidence": [
-          {
-            "file": "internal/orders/analytics.go",
-            "line": 13,
-            "note": "json.Marshal builds a payload containing email and amount — the exact fields the asset describes as living in the orders database"
-          },
-          {
-            "file": "internal/orders/analytics.go",
-            "line": 22,
-            "note": "Payload is POSTed to a third-party collector, so the asset now exists outside the database as well"
-          },
-          {
-            "file": "internal/orders/orders.go",
-            "line": 8,
-            "note": "Every Create call now exports the asset off-host"
-          }
-        ],
-        "relevance": {
-          "rating": "strong",
-          "justification": "The asset description and the only threat covering it scope exposure to the database; the diff creates a second, unmodeled location and channel for the same Confidential data."
-        },
-        "agent_prompt": "Update app.tm.hcl: (1) revise the information_asset \"order-history\" description so it no longer claims the data lives only \"in the orders database\" — it is now also transmitted to a third-party analytics collector (internal/orders/analytics.go:13-22); (2) add a threat covering disclosure of order-history in transit to / at rest within that third party (STRIDE: Info Disclosure, impacts Confidentiality), since the existing threat \"order database exposure\" (app.tm.hcl:12) and its control \"database network isolation\" only address direct database access.",
-        "suggested_fix": "Broaden the 'order-history' asset description and add an Info Disclosure threat for order data sent to the third-party analytics service."
-      },
-      {
-        "category": "unmodeled_surface",
-        "severity": "review_recommended",
-        "title": "New unauthenticated outbound HTTP client call with no timeout, TLS pinning, or auth modeled",
-        "model_excerpt": {
-          "file": "app.tm.hcl",
-          "line": 17,
-          "quote": "control \"database network isolation\" implemented=true — The orders database accepts connections only from the web app's subnet"
-        },
-        "evidence": [
-          {
-            "file": "internal/orders/analytics.go",
-            "line": 22,
-            "note": "http.Post uses the default http client: no timeout, no credential, no request signing on an egress path carrying confidential data"
+            "note": "Hard-coded third-party service endpoint collector.example-analytics.com introduced by this PR"
           },
           {
             "file": "internal/orders/orders.go",
             "line": 9,
-            "note": "Failures are only logged, so a hijacked or failing collector is silent to callers"
+            "note": "Failures are only logged, so the dependency is non-blocking — an uptime_dependency of 'degraded' should be recorded explicitly"
           }
         ],
         "relevance": {
           "rating": "moderate",
-          "justification": "The model's only control is inbound database network isolation; it says nothing about egress paths, and this new one has no controls asserted at all."
+          "justification": "The model declares no third-party dependencies, yet the code now integrates a hosted external processor of confidential data."
         },
-        "agent_prompt": "Update app.tm.hcl: under the new third-party analytics threat, add control blocks describing how the egress call in internal/orders/analytics.go:22 is protected (TLS verification, request authentication/API key, client timeout, and data minimisation such as omitting o.CustomerEmail). Mark implemented = false for any control not present in the code today — the current call uses http.Post with the default client and no credentials.",
-        "suggested_fix": "Add controls (TLS/auth/timeout/data minimisation) for the analytics egress call and mark unimplemented ones implemented = false."
+        "agent_prompt": "In app.tm.hcl, add a third_party_dependency block for the hosted analytics provider reached at https://collector.example-analytics.com/v1/events (introduced in internal/orders/analytics.go line 9). Set a description noting it receives customer email addresses and order amounts, reference the information_asset \"order-history\", and set uptime_dependency = \"degraded\" since internal/orders/orders.go line 9 only logs publish failures.",
+        "suggested_fix": "Add a third_party_dependency block for the analytics collector referencing order-history with uptime_dependency = \"degraded\"."
+      },
+      {
+        "category": "stale_assertion",
+        "severity": "review_recommended",
+        "title": "order-history asset still described as living only in the orders database",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "Customer orders, including email addresses and amounts, in the orders database"
+        },
+        "evidence": [
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 17,
+            "note": "Customer email and amount are serialised and leave the service"
+          },
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 22,
+            "note": "Data is transmitted to a third-party HTTP endpoint, so the asset now resides outside the database as well"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The asset's stated location is now incomplete: the same fields are copied to an external processor."
+        },
+        "agent_prompt": "In app.tm.hcl, update the information_asset \"order-history\" description (line 7) so it no longer implies the data lives only in the orders database: state that customer email addresses and order amounts are also transmitted to the hosted analytics collector (internal/orders/analytics.go lines 17 and 22). Keep classification = \"Confidential\".",
+        "suggested_fix": "Broaden the order-history information_asset description to include egress to the hosted analytics collector."
       }
     ]
   }

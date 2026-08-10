@@ -1,17 +1,17 @@
 {
-  "recorded_at": "2026-08-10T22:17:44Z",
+  "recorded_at": "2026-08-10T22:30:02Z",
   "source": "corpus/phantom-control",
   "model": "claude-opus-5",
-  "request_digest": "03fc72543489a097d36a82f579e7d2c9afb6c2296005da5973a2e506f0326023",
+  "request_digest": "383a20bb6ede38d99ba5470f0ab4164a53758f4482924e35e5a2c5cc14c6b184",
   "report": {
     "schema_version": "0.1",
     "no_drift": false,
-    "summary": "One action_required finding: the control 'login rate limiting' is still marked implemented = true but internal/auth/ratelimit.go was gutted into a pass-through no-op in this PR.",
+    "summary": "One action_required finding: the control 'login rate limiting' is still marked implemented = true although internal/auth/ratelimit.go was gutted into a pass-through middleware.",
     "findings": [
       {
         "category": "phantom_control",
         "severity": "action_required",
-        "title": "Control 'login rate limiting' is marked implemented but the middleware is now a no-op",
+        "title": "Control 'login rate limiting' is now a no-op pass-through",
         "model_excerpt": {
           "file": "app.tm.hcl",
           "line": 17,
@@ -20,21 +20,26 @@
         "evidence": [
           {
             "file": "internal/auth/ratelimit.go",
-            "line": 1,
-            "note": "Diff removes the golang.org/x/time/rate token-bucket implementation, the per-IP bucket map, and the 429 rejection path."
+            "line": 7,
+            "note": "RateLimit now simply returns next; no token bucket, no per-IP tracking, no 429 response"
           },
           {
             "file": "internal/auth/ratelimit.go",
             "line": 6,
-            "note": "Current file contents: RateLimit(next http.Handler) simply returns next, so no rate limiting is enforced on POST /login."
+            "note": "Function comment reduced to 'wraps the login handler chain' — no enforcement remains"
+          },
+          {
+            "file": "internal/auth/ratelimit.go",
+            "line": 3,
+            "note": "golang.org/x/time/rate import and the sync-guarded per-IP bucket map were removed in this PR, deleting the entire token-bucket implementation"
           }
         ],
         "relevance": {
           "rating": "strong",
-          "justification": "The exact file cited by the control now contains a pass-through function with no limiting logic, directly contradicting implemented = true and leaving the 'credential stuffing' threat unmitigated."
+          "justification": "The model names this exact file as the implementation, and the diff removes the whole enforcement path, leaving an identity middleware."
         },
-        "agent_prompt": "In app.tm.hcl, the threat \"credential stuffing\" (line 12) has a control \"login rate limiting\" (line 17) with implemented = true and description \"Per-IP token-bucket rate limiting middleware on POST /login, implemented in internal/auth/ratelimit.go\". This PR rewrote internal/auth/ratelimit.go so that RateLimit(next http.Handler) now just returns next — the golang.org/x/time/rate per-IP token bucket and the HTTP 429 rejection path were deleted, so no rate limiting is enforced on POST /login. Update the control block: set implemented = false and amend the description to state that internal/auth/ratelimit.go is currently a pass-through no-op (or, if limiting moved elsewhere, point the description at the new enforcement point and keep implemented = true only with a concrete file reference). Leave the threat's stride/impacts unchanged.",
-        "suggested_fix": "Set implemented = false on control \"login rate limiting\" in app.tm.hcl and update its description to note internal/auth/ratelimit.go is now a pass-through."
+        "agent_prompt": "In app.tm.hcl, the threat \"credential stuffing\" (line 12) has a control \"login rate limiting\" at line 17 with implemented = true and description \"Per-IP token-bucket rate limiting middleware on POST /login, implemented in internal/auth/ratelimit.go\". This PR rewrote internal/auth/ratelimit.go so that RateLimit(next http.Handler) simply returns next — the golang.org/x/time/rate limiter, the per-IP bucket map, and the 429 response were all deleted, so no rate limiting is enforced on POST /login. Set implemented = false for that control and update its description to state that internal/auth/ratelimit.go is currently a pass-through with no enforcement (or, if enforcement moved elsewhere, point the description at the new implementation file and keep implemented = true).",
+        "suggested_fix": "Set implemented = false on control \"login rate limiting\" in app.tm.hcl and note that internal/auth/ratelimit.go no longer enforces a token bucket."
       }
     ]
   }

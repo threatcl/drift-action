@@ -135,10 +135,19 @@ never have their comment edited); a `concurrency:` block in the scaffolded
 workflow so rapid pushes supersede instead of racing the comment; and the
 finding-quality corpus under `testdata/corpus/` — seven cases, one per
 category plus clean, harness in `internal/corpus` gated on
-`THREATCL_DRIFT_CORPUS=live|record|replay`. Remaining: the corpus's first
-paid run (no recordings exist yet), and the `docker://` release switch —
-`.github/workflows/release.yml` already pushes to ghcr on `v*` tags. See the
-plan file.
+`THREATCL_DRIFT_CORPUS=live|record|replay`. The corpus's first paid run is
+recorded and committed: all seven cases passed (clean case included), so
+those recordings are the quality baseline. Since then three review-quality
+changes landed: coverage warnings render above the fold (`writeWarnings`;
+the collapsed context block is never the only disclosure), context files are
+sent with `N→` line-number prefixes (citations were landing 1–3 lines off
+from hunk-header arithmetic), and the severity rules gained a
+partial-contradiction rule (still-true-but-incomplete assertions are
+`review_recommended`, so `fail_mode` can't flip on judgement wobble). The
+prompt changes make the recorded request digests stale — replay still works
+and logs it — so the next `record` run re-baselines and measures them.
+Remaining: the `docker://` release switch — `.github/workflows/release.yml`
+already pushes to ghcr on `v*` tags. See the plan file.
 
 ## Open items
 

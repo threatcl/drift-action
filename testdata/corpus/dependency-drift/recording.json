@@ -1,17 +1,17 @@
 {
-  "recorded_at": "2026-08-10T22:16:54Z",
+  "recorded_at": "2026-08-10T22:29:12Z",
   "source": "corpus/dependency-drift",
   "model": "claude-opus-5",
   "request_digest": "2026d998d09ced672fbafd6525315154774764028bf5110503161cbafbe872ac",
   "report": {
     "schema_version": "0.1",
     "no_drift": false,
-    "summary": "Two findings: session tokens (a Restricted asset) are now persisted in a new external Redis store that the threat model does not represent, plus an unmodeled new third-party dependency github.com/redis/go-redis/v9.",
+    "summary": "Two review-recommended findings: the new Redis session cache introduces an unmodeled external data store for Restricted session tokens, and the newly added github.com/redis/go-redis/v9 dependency has no third_party_dependency assertion.",
     "findings": [
       {
         "category": "unmodeled_surface",
-        "severity": "action_required",
-        "title": "Restricted session tokens now stored in an unmodeled external Redis cache",
+        "severity": "review_recommended",
+        "title": "Session tokens now persisted in an external Redis store not represented in the model",
         "model_excerpt": {
           "file": "app.tm.hcl",
           "line": 7,
@@ -21,30 +21,30 @@
           {
             "file": "internal/session/cache.go",
             "line": 11,
-            "note": "New Cache type stores session tokens in Redis so instances share log-ins — a data store not present in the model"
-          },
-          {
-            "file": "internal/session/cache.go",
-            "line": 17,
-            "note": "redis.NewClient(\u0026redis.Options{Addr: addr}) — no TLS and no password/ACL configured for the connection carrying Restricted tokens"
+            "note": "New Cache type holds a Redis client: \"Cache stores session tokens in Redis so instances share log-ins.\""
           },
           {
             "file": "internal/session/cache.go",
             "line": 22,
-            "note": "Put writes key \"session:\"+token holding userID, i.e. the raw bearer token is the storage key (no hashing)"
+            "note": "Raw session token used as the Redis key (\"session:\"+token) and stored with the user id, so the Restricted asset leaves the process boundary"
+          },
+          {
+            "file": "internal/session/cache.go",
+            "line": 16,
+            "note": "NewCache connects to an arbitrary addr with no TLS or auth options set on redis.Options"
           }
         ],
         "relevance": {
           "rating": "strong",
-          "justification": "The model's only Restricted information asset is now written to and read from a brand-new external store with no modeled trust boundary or protection."
+          "justification": "A Restricted information asset is now written to a new external store that no threat, control, or DFD element in the model describes."
         },
-        "agent_prompt": "Update app.tm.hcl for the threat model \"login service\": this PR added internal/session/cache.go, which persists the Restricted \"session tokens\" information asset in an external Redis instance (redis.NewClient with only an Addr — no TLS, no auth) using the raw bearer token as the key (\"session:\"+token). Add a data_flow_diagram (or dfd block) with a data_store \"session cache (Redis)\" plus flows from the login service process to it carrying the \"session tokens\" asset across a trust zone boundary, and add a threat covering compromise or sniffing of the session cache (STRIDE Spoofing/Information disclosure) with controls describing the intended Redis TLS/AUTH configuration and whether tokens are stored hashed; mark those controls implemented = false until the code sets them.",
-        "suggested_fix": "Add a Redis session-cache data store, its flows for the \"session tokens\" asset, and a threat/controls for cache compromise in app.tm.hcl."
+        "agent_prompt": "Update app.tm.hcl for the 'login service' threat model: this PR added internal/session/cache.go, which stores the Restricted 'session tokens' information asset in an external Redis instance (redis.NewClient at internal/session/cache.go:16, SET of key \"session:\"+token at internal/session/cache.go:22, no TLS or auth configured). Add modelling for this new surface: either a data_flow_diagram with a data_store for the Redis session cache, a process for the session package, and a flow carrying 'session tokens' across the trust boundary, or at minimum a new threat block (STRIDE Spoofing/Information Disclosure) describing theft of session tokens from the shared Redis cache, with controls covering transport encryption, Redis authentication, and whether raw tokens (versus hashes) are used as keys.",
+        "suggested_fix": "Add a threat (and DFD data_store/flow) in app.tm.hcl covering session tokens stored in the external Redis cache."
       },
       {
         "category": "dependency_drift",
         "severity": "review_recommended",
-        "title": "New third-party dependency go-redis has no third_party_dependency assertion",
+        "title": "New go-redis dependency has no third_party_dependency assertion",
         "model_excerpt": {
           "file": "app.tm.hcl",
           "line": 23,
@@ -54,19 +54,19 @@
           {
             "file": "go.mod",
             "line": 6,
-            "note": "added github.com/redis/go-redis/v9 v9.7.0"
+            "note": "github.com/redis/go-redis/v9 v9.7.0 added as a direct requirement"
           },
           {
             "file": "internal/session/cache.go",
             "line": 7,
-            "note": "go-redis imported to back session storage, making Redis availability required for session lookup"
+            "note": "Package imports github.com/redis/go-redis/v9 and the service now depends on a reachable Redis instance for session lookups"
           }
         ],
         "relevance": {
           "rating": "strong",
-          "justification": "The model lists only the IdP as a third-party dependency, yet session resolution now depends on a newly added Redis client library and server."
+          "justification": "The model lists only the IdP as a third-party dependency, while session resolution now depends on an external Redis service added in this PR."
         },
-        "agent_prompt": "Update app.tm.hcl: this PR added github.com/redis/go-redis/v9 v9.7.0 (go.mod:6) and internal/session/cache.go, which resolves every session token through Redis. Add a third_party_dependency block \"session cache (Redis)\" with a description noting it stores bearer tokens and an appropriate uptime_dependency value (Get failures block session resolution, so \"operational\" is likely correct unless there is a fallback), so the model reflects the new external dependency.",
+        "agent_prompt": "Update app.tm.hcl: this PR added github.com/redis/go-redis/v9 v9.7.0 (go.mod:6) and internal/session/cache.go now resolves session tokens from an external Redis instance (internal/session/cache.go:24-26), so the login service cannot authenticate sessions if Redis is unavailable. Add a third_party_dependency block named \"session cache (Redis)\" to the 'login service' threat model with a description of what it stores (Restricted session tokens) and set uptime_dependency to the correct value ('hard' if log-ins fail without it, 'degraded' otherwise).",
         "suggested_fix": "Add a third_party_dependency \"session cache (Redis)\" block to app.tm.hcl with the appropriate uptime_dependency."
       }
     ]

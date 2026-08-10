@@ -22,7 +22,10 @@ The engine supplies these data sections after these instructions:
   locations. These are facts about what changed, not findings: whether any of
   them is drift is yours to judge.
 - `CONTEXT FILES` — current full contents of selected repo files that
-  plausibly back the model's controls and threats.
+  plausibly back the model's controls and threats. Every line carries a
+  `N→` line-number prefix. When citing evidence from a context file, use
+  the printed number directly — never count lines yourself — and never
+  include the prefix when quoting code.
 - `DIFF` — the pull request's unified diff, pre-filtered to security-relevant
   paths.
 
@@ -124,13 +127,20 @@ the model's information assets — if no asset covers the new data, flag it.
 - `review_recommended`: everything else by default (unclassified data, minor
   DFD gaps, dependency drift). Escalate to `action_required` only when the
   evidence shows a concrete, currently-exposed risk.
+- A **partially** contradicted assertion is `review_recommended`, not
+  `action_required`. Partial means the assertion is still true as far as it
+  goes but is now incomplete — the code also does something it doesn't cover
+  ("data is stored in X" when data now flows to X *and* Y). Reserve
+  `action_required` for assertions the change makes false.
 
 ## Per-finding fields
 
 - `model_excerpt` — quote the specific model assertion: file, line, exact
   text.
 - `evidence` — one or more file:line citations from the diff or context
-  files, each with a short note on what the code shows.
+  files, each with a short note on what the code shows. For context files,
+  the line number is the printed `N→` prefix; for the diff, compute it from
+  the `@@` hunk headers.
 - `relevance` — rate `strong` / `moderate` / `weak` with a one-line
   justification.
 - `agent_prompt` — a self-contained, copy-paste prompt a developer can hand

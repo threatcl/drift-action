@@ -1,12 +1,12 @@
 {
-  "recorded_at": "2026-08-10T22:17:57Z",
+  "recorded_at": "2026-08-10T22:30:15Z",
   "source": "corpus/stale-assertion",
   "model": "claude-opus-5",
-  "request_digest": "643941b7032771b3bbbf7007cf162fd044dc25c3df117a2a1d35c84095f63a72",
+  "request_digest": "0f187945b18a0ec8a32e64688caa0028d5d669f0f98fb4d154b3e701e71826c6",
   "report": {
     "schema_version": "0.1",
     "no_drift": false,
-    "summary": "One action_required finding: the 'credential database theft' threat still asserts bcrypt cost 12 in internal/auth/password.go, but this PR replaces it with Argon2id.",
+    "summary": "One finding: the \"credential database theft\" threat still asserts bcrypt cost 12 in internal/auth/password.go, but this PR replaced it with Argon2id, making the assertion false (action_required).",
     "findings": [
       {
         "category": "stale_assertion",
@@ -20,26 +20,26 @@
         "evidence": [
           {
             "file": "internal/auth/password.go",
-            "line": 3,
-            "note": "Diff removes `import \"golang.org/x/crypto/bcrypt\"` and the `const cost = 12` declaration."
+            "line": 9,
+            "note": "bcrypt import replaced by golang.org/x/crypto/argon2"
           },
           {
             "file": "internal/auth/password.go",
             "line": 18,
-            "note": "HashPassword now derives the stored value with argon2.IDKey(password, salt, 1, 64*1024, 4, 32) — Argon2id, not bcrypt."
+            "note": "HashPassword now calls argon2.IDKey(password, salt, time=1, memory=64MiB, threads=4, keyLen=32) instead of bcrypt.GenerateFromPassword with cost 12"
           },
           {
             "file": "internal/auth/password.go",
-            "line": 39,
-            "note": "VerifyPassword recomputes the Argon2id key and compares with subtle.ConstantTimeCompare; no bcrypt.CompareHashAndPassword remains."
+            "line": 37,
+            "note": "VerifyPassword recomputes an Argon2id key and compares with crypto/subtle instead of bcrypt.CompareHashAndPassword"
           }
         ],
         "relevance": {
           "rating": "strong",
-          "justification": "The diff directly deletes the exact algorithm and cost parameter the threat description names as the mitigating property."
+          "justification": "The diff deletes the exact bcrypt/cost-12 implementation the threat description names, so the stated offline-cracking cost basis no longer describes the code."
         },
-        "agent_prompt": "Update app.tm.hcl: in the threat block \"credential database theft\" (line 12), the description asserts \"Passwords are hashed with bcrypt at cost 12 in internal/auth/password.go\". That is no longer true — this PR rewrote internal/auth/password.go to use Argon2id (argon2.IDKey with time=1, memory=64*1024 KiB, parallelism=4, 32-byte key, 16-byte crypto/rand salt) and removed the bcrypt import and `const cost = 12`. Rewrite the threat description to state the current algorithm and parameters, and update the description of the nested control \"password hashing\" (line 17) so it references Argon2id in internal/auth/password.go instead of implying bcrypt. While editing, confirm the chosen Argon2id parameters (single iteration) are still considered acceptable for the Restricted \"user credentials\" asset and note the decision in the threat description.",
-        "suggested_fix": "Replace the bcrypt cost-12 wording in the \"credential database theft\" threat and its \"password hashing\" control with the current Argon2id parameters in internal/auth/password.go."
+        "agent_prompt": "Update app.tm.hcl: the threat block \"credential database theft\" (line 12) states \"Passwords are hashed with bcrypt at cost 12 in internal/auth/password.go\". That is no longer true — this PR rewrote internal/auth/password.go to use Argon2id via golang.org/x/crypto/argon2 (argon2.IDKey with time=1, memory=64*1024 KiB, threads=4, 32-byte key, 16-byte crypto/rand salt) and constant-time comparison via crypto/subtle. Rewrite the threat description to name Argon2id and its actual parameters, and update the linked control \"password hashing\" (line 17) description so it also refers to Argon2id rather than implying bcrypt. Keep implemented = true since hashing is still present in internal/auth/password.go. If any legacy bcrypt hashes remain in the users table, note the migration/dual-verification state in the description as well.",
+        "suggested_fix": "Rewrite the \"credential database theft\" threat description (and the \"password hashing\" control description) in app.tm.hcl to reference Argon2id with its actual parameters instead of bcrypt cost 12."
       }
     ]
   }

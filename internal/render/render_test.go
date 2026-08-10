@@ -75,6 +75,44 @@ func TestCommentRendersFinding(t *testing.T) {
 	}
 }
 
+// Every coverage warning must render before the collapsed context block. When
+// findings exist the details sit closed, and a gap disclosed only inside one
+// is a gap the reader never sees.
+func TestCommentWarningsAboveFold(t *testing.T) {
+	out := Comment(&findings.Report{Summary: "1 finding."}, ContextInfo{
+		FilesChanged:  40,
+		FilesReviewed: 10,
+		Narrowed:      true,
+		NarrowedOut:   25,
+		PatchOmitted:  2,
+		OverCap:       5,
+		Replayed:      true,
+	})
+
+	fold := strings.Index(out, "<details>")
+	if fold < 0 {
+		t.Fatalf("comment has no details block:\n%s", out)
+	}
+	for _, warning := range []string{
+		"⚠️ Narrowing:",
+		"⚠️ Missing patches:",
+		"⚠️ Size limit:",
+		"⚠️ Replayed review:",
+	} {
+		at := strings.Index(out, warning)
+		if at < 0 {
+			t.Errorf("comment missing %q:\n%s", warning, out)
+			continue
+		}
+		if at > fold {
+			t.Errorf("%q renders inside the fold, want above it:\n%s", warning, out)
+		}
+		if strings.Contains(out[at+len(warning):], warning) {
+			t.Errorf("%q renders twice:\n%s", warning, out)
+		}
+	}
+}
+
 // A run refused for size must say no review ran and where to run one — and
 // must not claim any file was reviewed.
 func TestCommentOverCap(t *testing.T) {

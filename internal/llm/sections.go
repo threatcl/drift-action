@@ -2,6 +2,7 @@ package llm
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -35,7 +36,7 @@ func (r ReviewRequest) Sections() string {
 		b.WriteString("(none: no file this pull request touches is referenced by the threat model's prose)\n")
 	}
 	for _, file := range r.ContextFiles {
-		fmt.Fprintf(&b, "--- %s ---\n%s\n\n", file.Path, strings.TrimRight(file.Contents, "\n"))
+		fmt.Fprintf(&b, "--- %s ---\n%s\n\n", file.Path, numberLines(file.Contents))
 	}
 
 	fmt.Fprintf(&b, "\n=== DIFF ===\n\n%s\n",
@@ -49,4 +50,23 @@ func orNone(value, fallback string) string {
 		return trimmed
 	}
 	return fallback
+}
+
+// numberLines prefixes every line of a context file with its 1-based line
+// number. Evidence citations into context files were observed landing a few
+// lines off the real construct — the model was doing arithmetic from diff
+// hunk headers. Printed numbers replace arithmetic; the prompt tells the
+// model to cite them directly.
+func numberLines(contents string) string {
+	lines := strings.Split(strings.TrimRight(contents, "\n"), "\n")
+	width := len(strconv.Itoa(len(lines)))
+
+	var b strings.Builder
+	for i, line := range lines {
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "%*d→%s", width, i+1, line)
+	}
+	return b.String()
 }

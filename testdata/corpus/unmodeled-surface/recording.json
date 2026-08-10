@@ -1,17 +1,17 @@
 {
-  "recorded_at": "2026-08-10T22:18:32Z",
+  "recorded_at": "2026-08-10T22:30:57Z",
   "source": "corpus/unmodeled-surface",
   "model": "claude-opus-5",
   "request_digest": "983f9d45713522d5c2dd85ac251df20cfcf47b3d999f45714cb3245411e330a9",
   "report": {
     "schema_version": "0.1",
     "no_drift": false,
-    "summary": "Two findings: an unauthenticated GET /admin/export endpoint that bulk-exports user rows is entirely unmodeled (action required), plus user email addresses exported with no matching information asset.",
+    "summary": "Three findings: a new unauthenticated GET /admin/export endpoint that bulk-streams user emails is entirely unmodeled (action_required), plus unclassified email data and a session-validation control that no longer covers all data-reading routes.",
     "findings": [
       {
         "category": "unmodeled_surface",
         "severity": "action_required",
-        "title": "New GET /admin/export endpoint bulk-exports user rows and is absent from the model",
+        "title": "New GET /admin/export endpoint is not represented in the threat model and has no session check",
         "model_excerpt": {
           "file": "app.tm.hcl",
           "line": 3,
@@ -20,26 +20,26 @@
         "evidence": [
           {
             "file": "internal/httpapi/routes.go",
-            "line": 9,
-            "note": "New route mux.Handle(\"GET /admin/export\", exportHandler(store)) registered without the requireSession wrapper used for GET /profile"
+            "line": 10,
+            "note": "New route mux.Handle(\"GET /admin/export\", exportHandler(store)) registered without the requireSession wrapper used on GET /profile (line 9)"
           },
           {
             "file": "internal/httpapi/export.go",
             "line": 9,
-            "note": "exportHandler streams every user row (id, email, created_at) as CSV with no authentication or authorization check"
+            "note": "exportHandler streams every user row (id, email, created_at) as CSV with no authentication or authorization logic"
           }
         ],
         "relevance": {
           "rating": "strong",
-          "justification": "The model explicitly enumerates only POST /login and GET /profile; the diff adds a third, unauthenticated route that exposes the whole user table."
+          "justification": "The model enumerates exactly two endpoints; the diff adds a third that bulk-exports user data with no session enforcement."
         },
-        "agent_prompt": "Update app.tm.hcl for the 'login service' threat model. The PR adds a new route GET /admin/export (internal/httpapi/routes.go line 9) served by exportHandler in internal/httpapi/export.go, which streams every user row (id, email, created_at) as CSV. Unlike GET /profile, this route is NOT wrapped in requireSession, so it currently has no authentication or authorization. (1) Amend the threat model description to list the new endpoint alongside POST /login and GET /profile. (2) Add a new threat block, e.g. threat \"unauthenticated bulk user export\" with stride = [\"Information Disclosure\", \"Elevation of Privilege\"], impacts = [\"Confidentiality\"], description referencing GET /admin/export and internal/httpapi/export.go. (3) Add a control under that threat for admin authentication/authorization on /admin/export with implemented = false until the handler is wrapped in requireSession plus an admin role check.",
-        "suggested_fix": "Add a threat + not-implemented admin-authz control for GET /admin/export and list the endpoint in the model description."
+        "agent_prompt": "Update app.tm.hcl for the 'login service' threat model: the service now exposes a third endpoint, GET /admin/export, added in internal/httpapi/routes.go:10 and implemented in internal/httpapi/export.go, which streams every user row (id, email, created_at) as CSV and is registered WITHOUT the requireSession wrapper that protects GET /profile. Amend the threatmodel description to include GET /admin/export, and add a new threat block (stride = \"Information Disclosure\", information_disclosure/confidentiality impact) describing unauthenticated bulk export of the user table via GET /admin/export, with a control block for admin authentication/authorization on that route and implemented set to the true current state (false unless such a check is added).",
+        "suggested_fix": "Add a threat for unauthenticated bulk user export via GET /admin/export and update the threatmodel description to list the new endpoint."
       },
       {
         "category": "unclassified_data",
         "severity": "review_recommended",
-        "title": "Exported user email addresses and creation timestamps are not covered by any information asset",
+        "title": "Exported user email addresses are not covered by any information asset",
         "model_excerpt": {
           "file": "app.tm.hcl",
           "line": 7,
@@ -48,21 +48,49 @@
         "evidence": [
           {
             "file": "internal/httpapi/export.go",
-            "line": 14,
-            "note": "CSV header writes \"id\", \"email\", \"created_at\" — email is personal data"
+            "line": 15,
+            "note": "CSV header writes \"id\", \"email\", \"created_at\" — email addresses leave the service in bulk"
           },
           {
             "file": "internal/httpapi/export.go",
-            "line": 16,
-            "note": "Loop emits u.Email and u.CreatedAt for every user in the store"
+            "line": 17,
+            "note": "Each row emits u.Email, personal data not described by the 'user credentials' asset (usernames and password hashes)"
           }
         ],
         "relevance": {
           "rating": "strong",
-          "justification": "The only declared asset covers usernames and password hashes; user email addresses now leave the system in bulk with no classification."
+          "justification": "A new export path emits personal data (email addresses) that no information asset in the model classifies."
         },
-        "agent_prompt": "Update app.tm.hcl: the PR's new export handler (internal/httpapi/export.go lines 14-17) emits user id, email and created_at for every user, but the only information_asset declared is \"user credentials\" (usernames and password hashes). Add an information_asset block, e.g. information_asset \"user contact data\" with classification = \"Confidential\" (or the repo's PII classification) and a description naming email addresses and account creation timestamps exposed via GET /admin/export, and reference it from the export-related threat.",
-        "suggested_fix": "Add an information_asset covering user email addresses / account metadata exposed by the CSV export."
+        "agent_prompt": "Update app.tm.hcl: add an information_asset block (e.g. \"user contact data\") with an appropriate classification (Confidential/Restricted) and a description covering user email addresses and account creation timestamps exposed by internal/httpapi/export.go:15-17, which streams id, email and created_at for every user as CSV. Reference this asset from the threat covering the GET /admin/export endpoint.",
+        "suggested_fix": "Add an information_asset covering user email addresses/created_at exposed by the CSV export."
+      },
+      {
+        "category": "stale_assertion",
+        "severity": "review_recommended",
+        "title": "\"Session validation\" control no longer covers every path that reads user data",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 28,
+          "quote": "control \"session validation\" implemented=true — Every profile request resolves the bearer token against the session store"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 9,
+            "note": "GET /profile is still wrapped in requireSession, so the control holds for profile only"
+          },
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 10,
+            "note": "GET /admin/export bypasses requireSession, so token-replay protection does not apply to this new user-data read path"
+          }
+        ],
+        "relevance": {
+          "rating": "moderate",
+          "justification": "The control's claim is still literally true for /profile but is now an incomplete description of session enforcement across user-data endpoints."
+        },
+        "agent_prompt": "Update app.tm.hcl: the control 'session validation' (implemented = true) inside the 'session hijacking' threat asserts that every profile request resolves the bearer token against the session store. That is still true for GET /profile (internal/httpapi/routes.go:9) but the newly added GET /admin/export route (internal/httpapi/routes.go:10) reads the full user table without requireSession. Either broaden the session hijacking threat/control description to state which routes are session-protected and note the unprotected export route, or add a separate control for authentication on /admin/export with implemented reflecting reality.",
+        "suggested_fix": "Scope the 'session validation' control description to the routes it actually protects and note /admin/export is unprotected."
       }
     ]
   }

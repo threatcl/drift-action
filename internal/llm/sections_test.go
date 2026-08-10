@@ -48,6 +48,24 @@ func TestSectionsNamesEmptySections(t *testing.T) {
 	}
 }
 
+// Context files carry printed line numbers, so evidence cites them instead of
+// doing arithmetic from hunk headers — observed to land citations a few lines
+// off. Widths pad so the arrow column lines up.
+func TestSectionsNumbersContextFiles(t *testing.T) {
+	body := ReviewRequest{
+		ContextFiles: []ContextFile{{
+			Path:     "internal/auth/session.go",
+			Contents: strings.Repeat("x\n", 9) + "last line\n",
+		}},
+	}.Sections()
+
+	for _, want := range []string{" 1→x", " 9→x", "10→last line"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("context file missing numbered line %q:\n%s", want, body)
+		}
+	}
+}
+
 // Without this, the categories config setting is a silent no-op.
 func TestSectionsRestrictsCategories(t *testing.T) {
 	body := ReviewRequest{Categories: []string{"phantom_control", "dfd_drift"}}.Sections()

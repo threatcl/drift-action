@@ -383,6 +383,7 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 
 	// A replayed review never passes for a live one, however it is rendered.
 	if replaying != "" {
+		info.Replayed = true
 		info.AnalysisMode = fmt.Sprintf(
 			"replayed from %s — no model ran in this build, so these findings were not produced from the current diff",
 			displayPath(replaying, in.workspace))
