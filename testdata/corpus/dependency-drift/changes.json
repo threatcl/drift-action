@@ -1,0 +1,12 @@
+[
+  {
+    "path": "go.mod",
+    "status": "modified",
+    "patch_file": "patches/go.mod.patch"
+  },
+  {
+    "path": "internal/session/cache.go",
+    "status": "added",
+    "patch_file": "patches/cache.go.patch"
+  }
+]

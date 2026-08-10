@@ -1,0 +1,10 @@
+{
+  "description": "A new GET /admin/export endpoint bulk-exports user rows as CSV — wired without the session middleware the other authenticated route uses — and no threat models it.",
+  "no_drift": false,
+  "findings": [
+    {
+      "category": "unmodeled_surface",
+      "evidence_file": "internal/httpapi/export.go"
+    }
+  ]
+}

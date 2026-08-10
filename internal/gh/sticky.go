@@ -8,9 +8,13 @@ import (
 
 // FindStickyComment returns the existing drift comment to update in place, or
 // nil when this is the first run on the PR.
-func FindStickyComment(comments []Comment) *Comment {
+//
+// Only a comment authored by the action's own login qualifies. The marker also
+// appears wherever someone quotes the review — and "update the sticky comment"
+// must never mean overwriting another user's words with a report.
+func FindStickyComment(comments []Comment, author string) *Comment {
 	for i := range comments {
-		if strings.Contains(comments[i].Body, render.StickyMarker) {
+		if comments[i].Author == author && strings.Contains(comments[i].Body, render.StickyMarker) {
 			return &comments[i]
 		}
 	}

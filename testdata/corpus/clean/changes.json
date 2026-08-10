@@ -1,0 +1,7 @@
+[
+  {
+    "path": "internal/log/log.go",
+    "status": "modified",
+    "patch_file": "patches/log.go.patch"
+  }
+]

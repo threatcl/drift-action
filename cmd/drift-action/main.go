@@ -261,12 +261,27 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 		// Everything filtered away is a coverage statement, not a clean bill
 		// of health — but a docs-only PR genuinely has no code to review.
 		NothingReviewed: len(in.filtered.Kept) == 0 && len(in.comparison.Changes) > in.filtered.Noise,
-		DiffTruncated:   len(in.comparison.Changes) > cfg.MaxDiffFiles,
 	}
 
 	if len(in.filtered.Kept) == 0 {
 		info.AnalysisMode = "none — no changed file reached the review, so no drift category was assessed"
 		return unassessed("No changed file was reviewed, so nothing was assessed. See the context below for why."), info
+	}
+
+	// The cap applies to what would be sent to inference, after filtering and
+	// narrowing have already tried to make the diff fit. It is all-or-nothing:
+	// reviewing the first N files of a larger set would read as a clean bill
+	// for the rest.
+	if cfg.MaxDiffFiles > 0 && len(in.filtered.Kept) > cfg.MaxDiffFiles {
+		log.Printf("diff too large: %d file(s) to review, max_diff_files is %d; skipping inference",
+			len(in.filtered.Kept), cfg.MaxDiffFiles)
+		info.OverCap = cfg.MaxDiffFiles
+		info.AnalysisMode = fmt.Sprintf(
+			"none — %d file(s) needed review, over the max_diff_files cap of %d, so no drift category was assessed",
+			len(in.filtered.Kept), cfg.MaxDiffFiles)
+		return unassessed(fmt.Sprintf(
+			"This diff is too large to review: %d file(s) needed review, over the configured cap of %d. Run `/threat-drift` locally with the threatcl claude-plugin to review it in full.",
+			len(in.filtered.Kept), cfg.MaxDiffFiles)), info
 	}
 
 	var provider llm.Provider

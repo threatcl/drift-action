@@ -1,0 +1,11 @@
+{
+  "description": "Password hashing migrates from bcrypt to argon2id. The control (\"server-side hashing\") stays true, but the threat description's concrete bcrypt-at-cost-12 assertion is now stale.",
+  "no_drift": false,
+  "context_files": ["internal/auth/password.go"],
+  "findings": [
+    {
+      "category": "stale_assertion",
+      "evidence_file": "internal/auth/password.go"
+    }
+  ]
+}

@@ -19,6 +19,8 @@ const CheckRunName = "Threat Drift"
 type Comment struct {
 	ID   int64
 	Body string
+	// Author is the login the comment was posted under.
+	Author string
 }
 
 // Client talks to the GitHub API for one PR.
@@ -27,6 +29,8 @@ type Client struct {
 	owner  string
 	repo   string
 	number int
+	// viewer caches the login this client's token posts comments as.
+	viewer string
 }
 
 // New builds a client for the PR described by ctx.
@@ -114,9 +118,36 @@ func (c *Client) UpsertStickyComment(ctx context.Context, body string) error {
 	return nil
 }
 
-func (c *Client) findSticky(ctx context.Context) (*Comment, error) {
-	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
+// actionsBotLogin is the author of every comment posted with the workflow
+// GITHUB_TOKEN.
+const actionsBotLogin = "github-actions[bot]"
 
+// login resolves the account this client's token posts comments as. The
+// workflow GITHUB_TOKEN is an installation token, which /user answers with a
+// 403 — its comments are authored by github-actions[bot].
+func (c *Client) login(ctx context.Context) (string, error) {
+	if c.viewer != "" {
+		return c.viewer, nil
+	}
+	user, resp, err := c.api.Users.Get(ctx, "")
+	if err != nil {
+		if resp != nil && resp.StatusCode == 403 {
+			c.viewer = actionsBotLogin
+			return c.viewer, nil
+		}
+		return "", fmt.Errorf("resolving the authenticated user: %w", err)
+	}
+	c.viewer = user.GetLogin()
+	return c.viewer, nil
+}
+
+func (c *Client) findSticky(ctx context.Context) (*Comment, error) {
+	author, err := c.login(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	opts := &github.IssueListCommentsOptions{ListOptions: github.ListOptions{PerPage: 100}}
 	for {
 		comments, resp, err := c.api.Issues.ListComments(ctx, c.owner, c.repo, c.number, opts)
 		if err != nil {
@@ -125,9 +156,13 @@ func (c *Client) findSticky(ctx context.Context) (*Comment, error) {
 
 		page := make([]Comment, 0, len(comments))
 		for _, comment := range comments {
-			page = append(page, Comment{ID: comment.GetID(), Body: comment.GetBody()})
+			page = append(page, Comment{
+				ID:     comment.GetID(),
+				Body:   comment.GetBody(),
+				Author: comment.GetUser().GetLogin(),
+			})
 		}
-		if found := FindStickyComment(page); found != nil {
+		if found := FindStickyComment(page, author); found != nil {
 			return found, nil
 		}
 

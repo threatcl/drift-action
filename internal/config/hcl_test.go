@@ -24,8 +24,9 @@ trigger_paths = ["src/payments/"]
 fail_mode     = "on-action-required"
 
 llm {
-  model  = "claude-sonnet-5"
-  effort = "medium"
+  provider = "anthropic"
+  model    = "claude-sonnet-5"
+  effort   = "medium"
 }
 
 limits {
@@ -77,6 +78,8 @@ func TestLoadFileRejectsBadValues(t *testing.T) {
 	}{
 		{"unknown category", `categories = ["phantom_controls"]`, "unknown drift category"},
 		{"bad fail mode", `fail_mode = "always"`, "fail_mode must be"},
+		{"unknown provider", `llm { provider = "openai" }`, "llm.provider must be"},
+		{"bad effort", `llm { effort = "extreme" }`, "llm.effort must be"},
 		{"malformed hcl", `fail_mode = `, "parsing"},
 		{"unknown attribute", `not_a_setting = true`, "decoding"},
 	}

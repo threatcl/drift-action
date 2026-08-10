@@ -84,6 +84,11 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 	}
 	if fc.LLM != nil {
 		if fc.LLM.Provider != "" {
+			if !knownProvider(fc.LLM.Provider) {
+				return c, fmt.Errorf(
+					"%s: llm.provider must be \"anthropic\" (v0 supports anthropic only), got %q",
+					path, fc.LLM.Provider)
+			}
 			c.Provider = fc.LLM.Provider
 		}
 		if fc.LLM.Model != "" {
@@ -119,6 +124,17 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 		}
 	}
 	return c, nil
+}
+
+// knownProvider fails a provider typo at config time, like every other enum
+// here — main's provider switch would otherwise catch it only at review time,
+// after the diff has already been fetched.
+func knownProvider(provider string) bool {
+	switch provider {
+	case "anthropic":
+		return true
+	}
+	return false
 }
 
 // knownEffort keeps a typo from reaching the API as a 400 mid-run, after the

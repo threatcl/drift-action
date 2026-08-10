@@ -1,0 +1,12 @@
+[
+  {
+    "path": "internal/orders/analytics.go",
+    "status": "added",
+    "patch_file": "patches/analytics.go.patch"
+  },
+  {
+    "path": "internal/orders/orders.go",
+    "status": "modified",
+    "patch_file": "patches/orders.go.patch"
+  }
+]

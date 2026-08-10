@@ -1,0 +1,10 @@
+{
+  "description": "The profile response starts returning tax IDs and dates of birth. The model's only information_asset covers credentials; nothing classifies this data.",
+  "no_drift": false,
+  "findings": [
+    {
+      "category": "unclassified_data",
+      "evidence_file": "internal/httpapi/user.go"
+    }
+  ]
+}

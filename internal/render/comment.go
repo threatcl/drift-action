@@ -40,9 +40,13 @@ type ContextInfo struct {
 	// NothingReviewed means every changed file was filtered away, so no
 	// finding could have been produced regardless of the model's accuracy.
 	NothingReviewed bool
-	DiffTruncated   bool
-	AnalysisMode    string
-	Notes           []string
+	// OverCap, when positive, is the max_diff_files value that stopped this
+	// run: even after filtering, more files needed review than the cap allows,
+	// so none were sent to inference. The cap is all-or-nothing — reviewing a
+	// subset would present partial coverage as a review.
+	OverCap      int
+	AnalysisMode string
+	Notes        []string
 }
 
 var categoryLabels = map[findings.Category]struct{ Icon, Name string }{
@@ -120,8 +124,13 @@ func writeContext(b *strings.Builder, info ContextInfo) {
 		b.WriteString("\n")
 	}
 	if info.FilesChanged > 0 {
-		fmt.Fprintf(b, "- 📄 Diff: %d of %d changed files reviewed",
-			info.FilesReviewed, info.FilesChanged)
+		// Over the cap nothing was reviewed, so the line must not say it was.
+		verb := "reviewed"
+		if info.OverCap > 0 {
+			verb = "needed review"
+		}
+		fmt.Fprintf(b, "- 📄 Diff: %d of %d changed files %s",
+			info.FilesReviewed, info.FilesChanged, verb)
 		if info.NoiseDropped > 0 {
 			fmt.Fprintf(b, " (%d skipped as docs, lock files, vendored or generated)", info.NoiseDropped)
 		}
@@ -138,8 +147,9 @@ func writeContext(b *strings.Builder, info ContextInfo) {
 		fmt.Fprintf(b, "- ⚠️ Missing patches: %d file(s) came back from the GitHub API without one, being too large or binary, and were not analysed\n",
 			info.PatchOmitted)
 	}
-	if info.DiffTruncated {
-		b.WriteString("- ⚠️ Size limit: the diff exceeded it, so run `/threat-drift` locally with the threatcl claude-plugin for full coverage\n")
+	if info.OverCap > 0 {
+		fmt.Fprintf(b, "- ⚠️ Size limit: %d file(s) needed review but `max_diff_files` is %d, so no review ran — run `/threat-drift` locally with the threatcl claude-plugin for full coverage\n",
+			info.FilesReviewed, info.OverCap)
 	}
 	if info.AnalysisMode != "" {
 		fmt.Fprintf(b, "- 🤖 Analysis: %s\n", info.AnalysisMode)

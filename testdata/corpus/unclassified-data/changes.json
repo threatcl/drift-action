@@ -1,0 +1,7 @@
+[
+  {
+    "path": "internal/httpapi/user.go",
+    "status": "modified",
+    "patch_file": "patches/user.go.patch"
+  }
+]

@@ -1,0 +1,9 @@
+@@ -8,6 +8,6 @@
+ 
+ // Printf writes a timestamped line to stderr.
+ func Printf(format string, args ...any) {
+-	ts := time.Now().UTC().Format(time.RFC3339)
+-	fmt.Fprintf(os.Stderr, "%s "+format+"\n", append([]any{ts}, args...)...)
++	stamp := time.Now().UTC().Format(time.RFC3339Nano)
++	fmt.Fprintf(os.Stderr, "%s "+format+"\n", append([]any{stamp}, args...)...)
+ }

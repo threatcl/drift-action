@@ -38,6 +38,12 @@ name: threat-drift
 on:
   pull_request:
 
+# One review in flight per PR. A push supersedes the run for the previous
+# commit rather than racing it for the sticky comment.
+concurrency:
+  group: threat-drift-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: write
@@ -52,6 +58,12 @@ jobs:
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
+
+The `concurrency` block matters more here than in most workflows: the review
+takes minutes of inference, and without it two rapid pushes race to update the
+same sticky comment — last writer wins, possibly with findings from the older
+commit. Cancelling the in-flight run means the comment always reflects the
+newest push.
 
 ### Inputs
 
@@ -193,16 +205,16 @@ llm {
 }
 
 limits {
-  max_diff_files    = 200
+  max_diff_files    = 200    # hard cap on files sent to review; over it, no review runs
   max_patch_bytes   = 400000 # cap on the rendered diff
   max_context_bytes = 200000 # cap on whole files sent alongside it
   narrow_above      = 50
 }
 ```
 
-An unknown category, fail mode or effort level is a hard error rather than a
-silent default, so a typo can never quietly disable a drift check or fail the
-request after the diff has already been fetched.
+An unknown category, fail mode, effort level or provider is a hard error
+rather than a silent default, so a typo can never quietly disable a drift
+check or fail the request after the diff has already been fetched.
 
 `max_tokens` bounds the model's output *including* its thinking. Too tight and
 the report is truncated mid-JSON, which the run reports as an error rather than
@@ -222,6 +234,14 @@ it cut down to security-relevant paths to stay within budget, and when that
 happens the comment says how many files went unreviewed. The default is to
 keep a file, not to drop it: under-reviewing a PR produces a clean-looking
 result that hides real drift, which is the worst outcome this action has.
+
+If more than `max_diff_files` files still need review after filtering and
+narrowing, no review runs at all. The comment says the diff is too large and
+to run `/threat-drift` locally with the [threatcl
+claude-plugin](https://github.com/threatcl/claude-plugin), the check run stays
+neutral, and the verdict is `unassessed`. The cap is deliberately
+all-or-nothing — reviewing the first 200 files of a 500-file diff would
+present partial coverage as a review.
 
 ## Security notes
 

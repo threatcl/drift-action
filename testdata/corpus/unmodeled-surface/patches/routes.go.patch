@@ -1,0 +1,8 @@
+@@ -6,6 +6,7 @@
+ func Routes(store *Store) http.Handler {
+ 	mux := http.NewServeMux()
+ 	mux.Handle("POST /login", loginHandler(store))
+ 	mux.Handle("GET /profile", requireSession(profileHandler(store)))
++	mux.Handle("GET /admin/export", exportHandler(store))
+ 	return mux
+ }

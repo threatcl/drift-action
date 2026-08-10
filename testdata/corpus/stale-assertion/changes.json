@@ -1,0 +1,7 @@
+[
+  {
+    "path": "internal/auth/password.go",
+    "status": "modified",
+    "patch_file": "patches/password.go.patch"
+  }
+]

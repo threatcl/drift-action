@@ -1,0 +1,18 @@
+@@ -8,6 +8,8 @@
+ type profileResponse struct {
+ 	ID    string `json:"id"`
+ 	Email string `json:"email"`
++	TaxID       string `json:"tax_id"`
++	DateOfBirth string `json:"date_of_birth"`
+ }
+ 
+ // profileHandler returns the signed-in user's profile.
+@@ -17,6 +19,8 @@
+ 		json.NewEncoder(w).Encode(profileResponse{
+ 			ID:    u.ID,
+ 			Email: u.Email,
++			TaxID:       u.TaxID,
++			DateOfBirth: u.DateOfBirth,
+ 		})
+ 	})
+ }

@@ -1,0 +1,5 @@
+{
+  "description": "A logging refactor: timestamp precision and a variable rename. Nothing the model asserts is touched. A finding here is a false positive — the cries-wolf failure mode.",
+  "no_drift": true,
+  "findings": []
+}

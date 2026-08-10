@@ -1,0 +1,11 @@
+{
+  "description": "The rate-limiting middleware is gutted to a pass-through while the control still claims implemented = true. The workspace file shows the limiter is gone at head, not just outside the hunk.",
+  "no_drift": false,
+  "context_files": ["internal/auth/ratelimit.go"],
+  "findings": [
+    {
+      "category": "phantom_control",
+      "evidence_file": "internal/auth/ratelimit.go"
+    }
+  ]
+}

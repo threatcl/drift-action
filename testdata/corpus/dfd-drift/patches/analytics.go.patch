@@ -1,0 +1,25 @@
+@@ -0,0 +1,24 @@
++package orders
++
++import (
++	"bytes"
++	"encoding/json"
++	"net/http"
++)
++
++const analyticsURL = "https://collector.example-analytics.com/v1/events"
++
++// publishAnalytics sends order events to the hosted analytics service.
++func publishAnalytics(o Order) error {
++	payload, err := json.Marshal(map[string]any{
++		"event":    "order_created",
++		"order_id": o.ID,
++		"email":    o.CustomerEmail,
++		"amount":   o.AmountCents,
++	})
++	if err != nil {
++		return err
++	}
++	_, err = http.Post(analyticsURL, "application/json", bytes.NewReader(payload))
++	return err
++}

@@ -42,9 +42,12 @@ type Config struct {
 	MaxTokens int
 	// APIKeyEnv names the environment variable holding the provider API key.
 	APIKeyEnv string
-	// MaxDiffFiles and MaxPatchBytes cap what is sent to inference; beyond
-	// them the run reports "diff too large" rather than silently truncating.
-	MaxDiffFiles  int
+	// MaxDiffFiles caps how many files may be sent to inference, applied
+	// after filtering and narrowing. Over it the run refuses outright — "diff
+	// too large, run locally" — rather than reviewing a subset.
+	MaxDiffFiles int
+	// MaxPatchBytes budgets the rendered diff; files that do not fit are
+	// omitted from the review and named in the comment.
 	MaxPatchBytes int
 	// MaxContextBytes caps the whole repo files sent alongside the diff.
 	MaxContextBytes int

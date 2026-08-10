@@ -1,0 +1,10 @@
+@@ -4,6 +4,9 @@
+ func (s *Store) Create(o Order) error {
+ 	if err := s.db.Insert(o); err != nil {
+ 		return err
+ 	}
++	if err := publishAnalytics(o); err != nil {
++		s.log.Printf("analytics publish failed: %v", err)
++	}
+ 	return nil
+ }

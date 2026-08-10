@@ -1,0 +1,10 @@
+{
+  "description": "go.mod gains go-redis, and session tokens — a Restricted asset — start living in Redis. The model's only third_party_dependency block is the identity provider.",
+  "no_drift": false,
+  "findings": [
+    {
+      "category": "dependency_drift",
+      "evidence_file": "go.mod"
+    }
+  ]
+}

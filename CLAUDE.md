@@ -126,10 +126,19 @@ fact extraction, targeted context stuffing, the Anthropic provider (streaming,
 forced JSON, refusal handling, server-side fallbacks), schema validation, the
 comment renderer, and `dry-run`.
 
-Milestone 3 is polish and dogfooding: check-run conclusions wired to
-`fail_mode`, the diff-size cap with the "run locally" message, the
-`docker://` release switch, and the `testdata/` finding-quality corpus that
-tells us whether the engine is any good. See the plan file.
+Milestone 3 is polish and dogfooding. Done: check-run conclusions wired to
+`fail_mode`; the `max_diff_files` hard cap (applied to the post-filter review
+set, all-or-nothing, with the "run locally" message — `ContextInfo.OverCap`);
+`llm.provider` validated at config time like every other enum; the sticky
+comment matched on author as well as marker (a user quoting the review must
+never have their comment edited); a `concurrency:` block in the scaffolded
+workflow so rapid pushes supersede instead of racing the comment; and the
+finding-quality corpus under `testdata/corpus/` — seven cases, one per
+category plus clean, harness in `internal/corpus` gated on
+`THREATCL_DRIFT_CORPUS=live|record|replay`. Remaining: the corpus's first
+paid run (no recordings exist yet), and the `docker://` release switch —
+`.github/workflows/release.yml` already pushes to ghcr on `v*` tags. See the
+plan file.
 
 ## Open items
 

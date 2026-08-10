@@ -1,0 +1,10 @@
+{
+  "description": "Order events — including customer emails — start flowing to a hosted analytics collector. The DFD models customer → web app → orders database and has no such flow or external element.",
+  "no_drift": false,
+  "findings": [
+    {
+      "category": "dfd_drift",
+      "evidence_file": "internal/orders/analytics.go"
+    }
+  ]
+}

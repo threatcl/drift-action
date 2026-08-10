@@ -1,0 +1,29 @@
+@@ -0,0 +1,28 @@
++package session
++
++import (
++	"context"
++	"time"
++
++	"github.com/redis/go-redis/v9"
++)
++
++// Cache stores session tokens in Redis so instances share log-ins.
++type Cache struct {
++	client *redis.Client
++}
++
++// NewCache connects to the Redis instance at addr.
++func NewCache(addr string) *Cache {
++	return &Cache{client: redis.NewClient(&redis.Options{Addr: addr})}
++}
++
++// Put stores a session token for a user.
++func (c *Cache) Put(ctx context.Context, token, userID string) error {
++	return c.client.Set(ctx, "session:"+token, userID, 24*time.Hour).Err()
++}
++
++// Get resolves a session token to a user id.
++func (c *Cache) Get(ctx context.Context, token string) (string, error) {
++	return c.client.Get(ctx, "session:"+token).Result()
++}

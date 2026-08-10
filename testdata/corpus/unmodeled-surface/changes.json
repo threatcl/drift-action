@@ -1,0 +1,12 @@
+[
+  {
+    "path": "internal/httpapi/export.go",
+    "status": "added",
+    "patch_file": "patches/export.go.patch"
+  },
+  {
+    "path": "internal/httpapi/routes.go",
+    "status": "modified",
+    "patch_file": "patches/routes.go.patch"
+  }
+]

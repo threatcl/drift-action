@@ -75,6 +75,35 @@ func TestCommentRendersFinding(t *testing.T) {
 	}
 }
 
+// A run refused for size must say no review ran and where to run one — and
+// must not claim any file was reviewed.
+func TestCommentOverCap(t *testing.T) {
+	out := Comment(&findings.Report{
+		Summary: "This diff is too large to review.",
+	}, ContextInfo{
+		FilesChanged:  500,
+		FilesReviewed: 250,
+		OverCap:       200,
+	})
+
+	for _, want := range []string{
+		"250 file(s) needed review but `max_diff_files` is 200",
+		"no review ran",
+		"/threat-drift",
+		"250 of 500 changed files needed review",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("over-cap comment missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "files reviewed") {
+		t.Errorf("over-cap comment must not claim files were reviewed:\n%s", out)
+	}
+	if strings.Contains(out, "No drift detected") {
+		t.Errorf("over-cap comment must not read as clean:\n%s", out)
+	}
+}
+
 // A line number the engine could not determine must not render as ":0".
 func TestLocationOmitsUnknownLine(t *testing.T) {
 	if got := location("payments.tm.hcl", 0); got != "`payments.tm.hcl`" {
