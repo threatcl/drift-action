@@ -49,7 +49,7 @@ func stream(t *testing.T, events string) (*Client, *string) {
 		body = string(raw)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		io.WriteString(w, events)
+		_, _ = io.WriteString(w, events)
 	}))
 	t.Cleanup(server.Close)
 

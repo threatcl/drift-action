@@ -523,7 +523,11 @@ func writeOutputs(outputs map[string]string) {
 		log.Printf("warning: writing outputs: %v", err)
 		return
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("warning: closing outputs: %v", err)
+		}
+	}()
 
 	for key, value := range outputs {
 		if value == "" {
