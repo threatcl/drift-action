@@ -27,7 +27,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   information_asset "action credentials" {
-    description                = "The Anthropic API key and GitHub token the action holds at runtime; the token carries PR write permission"
+    description                = "The Anthropic API key and GitHub token the action holds at runtime; the token carries PR write permission. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, and a contents: write token in the major-alias job that can create and force-move tags in this repository — including the floating v0 alias consumers resolve"
     information_classification = "Restricted"
   }
 
@@ -69,11 +69,17 @@ threatmodel "threatcl-drift-action" {
     }
 
     control "Pin the workflow to the released action" {
-      description          = "Replace uses: ./ in .github/workflows/threat-drift.yml with the pinned threatcl/drift-action@v0 release so a published engine reviews PRs instead of each PR's own build"
+      description          = "Replace uses: ./ in .github/workflows/threat-drift.yml with an immutable pin — the release commit SHA, or failing that a vX.Y.Z tag — so a fixed, published engine reviews PRs instead of each PR's own build. Not @v0: the major alias is force-moved on every release, so pinning to it would leave the reviewing engine mutable"
       implemented          = false
-      implementation_notes = "Blocked on v0.1.0, which does not exist yet; the switch is recorded in a comment in the workflow itself. Until then uses: ./ is deliberate — it makes the job an end-to-end test of the PR's engine, and this control stays unimplemented"
+      implementation_notes = "The release plumbing this depends on is now in place: the major-alias job in .github/workflows/release.yml publishes the v0 alias after release-image succeeds, so the tag consumers pin is produced by the release workflow rather than by hand. The only remaining blocker is the first tagged release — no vX.Y.Z tag exists yet. The switch is recorded in a comment in .github/workflows/threat-drift.yml; until it happens uses: ./ is deliberate, since it makes the job an end-to-end test of the PR's engine, and this control stays unimplemented. Whichever pin lands, it should not be @v0 — that alias is force-moved with git tag -f and git push origin -f on every release, so pinning to it trades a PR-controlled build for a tag-push-controlled one rather than for a fixed target; see the 'Mutable major alias repointed at attacker-chosen code' threat. Consumers are documented on @v0 for the usual reasons, but this repo's own privileged dogfooding job is the case where the mutability matters most, so it takes the SHA pin"
       risk_reduction       = 60
     }
+  }
+
+  threat "Mutable major alias repointed at attacker-chosen code" {
+    description = "Consumers pin uses: threatcl/drift-action@v0, and the major-alias job in .github/workflows/release.yml moves that alias on every vX.Y.Z tag push with git tag -f and git push origin -f. The alias is force-moved rather than immutable, so v0 is a mutable pointer to whichever commit last claimed it — history is rewritten silently and there is no record on the tag of what it used to name. Anyone able to push a vX.Y.Z tag, or to alter .github/workflows/release.yml so the job computes a different target, repoints v0 for every downstream consumer at once; the job runs with contents: write, and its only guard is a tag-shape check that refuses a tag containing no dot. Consumers observe nothing: the same @v0 string resolves to different code on their next run, which then executes in their runner with their own secrets and their own PR-write token"
+    impacts     = ["Integrity"]
+    stride      = ["Tampering", "Elevation Of Privilege"]
   }
 
   threat "Repo source and diff shared with the LLM provider" {
@@ -97,15 +103,34 @@ threatmodel "threatcl-drift-action" {
   }
 
   threat "Replayed fixture impersonates a live review" {
-    description = "A recorded review replayed via THREATCL_DRIFT_REPLAY renders findings that were not produced from the current diff, and the recording itself is editable content under testdata/"
+    description = "A recorded review replayed via THREATCL_DRIFT_REPLAY renders findings that were not produced from the current diff, and the recording itself is editable content under testdata/. The same player now has two callers: this one, which renders and can post, and the finding-quality corpus, which asserts inside a test and reaches no renderer. Only this caller can put a recording in front of a reader, so the corpus's own exposure is a different problem and is modelled separately as 'Corpus recordings edited to pass the finding-quality gate'"
     impacts     = ["Integrity"]
     stride      = ["Spoofing"]
 
     control "Replay disclosure and schema re-validation" {
       ref            = "TCL-C-LLM-PROVENANCE"
-      description    = "Replayed runs set ContextInfo.Replayed, rendering an above-the-fold warning, and internal/llm/fixture/fixture.go re-validates the recorded report against the findings schema — a fixture is never trusted more than a live response"
+      description    = "Replayed runs set ContextInfo.Replayed, rendering an above-the-fold warning, and internal/llm/fixture/fixture.go re-validates the recorded report through findings.Parse in internal/findings/validate.go against the findings schema — a fixture is never trusted more than a live response. Both callers share that player, so the corpus replay path in internal/corpus/corpus_test.go re-validates against the schema identically; what does not carry over is the disclosure half, and it does not need to, because that path asserts in a test rather than rendering — a corpus recording can never influence a rendered pull request comment, a check run or an action output"
       implemented    = true
       risk_reduction = 60
+    }
+  }
+
+  threat "Corpus recordings edited to pass the finding-quality gate" {
+    description = "The corpus replay step in .github/workflows/ci.yml (THREATCL_DRIFT_CORPUS=replay running go test ./internal/corpus -v) is the only check in CI that speaks to finding quality rather than to whether the code compiles, and it decides its verdict entirely from files a pull request can edit: each case directory under testdata/corpus holds both the recorded review and the expectation that review is asserted against, so the same pull request that changes prompts/drift-ci.md, the severity rules or the context builder can also rewrite the evidence that its change did no harm. Replay calls no model, so the gate measures the recorded review and never the current engine. It also fails open twice over in internal/corpus/corpus_test.go: a recording whose request digest no longer matches the assembled prompt is reported with t.Logf and still passes, and a case with no recording is skipped rather than failed, so deleting one silently removes that case from the gate while the job exits 0. Distinct from the replayed-fixture threat above, whose harm is a reader believing a forged review — here nothing is rendered and nothing is posted, and what is lost is CI's assurance that finding quality has not regressed"
+    impacts     = ["Integrity"]
+    stride      = ["Tampering", "Repudiation"]
+
+    control "Corpus replay is test-only and cannot reach a pull request" {
+      description    = "internal/corpus/corpus_test.go assembles a review request, calls Provider.Review and asserts on the result; it imports neither internal/render nor the GitHub client, so no corpus recording has a path to a rendered comment, a check run or an action output. Recordings are read through the same player as a live-pipeline replay, so they are re-validated against the findings schema — which constrains an edited recording's shape but not its content, since a hand-written recording can be schema-valid and still say whatever the expectation demands. This bounds the blast radius to the CI verdict; it does not defend the gate itself"
+      implemented    = true
+      risk_reduction = 50
+    }
+
+    control "Fail the replay gate closed" {
+      description          = "Make internal/corpus/corpus_test.go fail rather than log when a recording's request digest no longer matches the assembled prompt, and fail rather than skip when a case has no recording, so re-recording after a prompt change is mandatory and a deleted recording is a red build instead of a quiet gap in coverage"
+      implemented          = false
+      implementation_notes = "Both fail-open behaviours are deliberate today and were chosen before the replay ran in CI. The skip exists because recordings accumulate one paid run at a time, so a newly added case has no recording until someone pays for one — failing closed needs a way to mark a case as not-yet-recorded, or the first commit of any new case breaks the build. The digest log exists because -v was judged enough disclosure when a human was reading the output; in CI nobody reads a passing job's log, which is what makes it fail-open rather than merely quiet. Neither change defends against a pull request that re-records deliberately — that is what review of testdata/corpus diffs is for — but both close the case where the gate is defeated by omission rather than by intent"
+      risk_reduction       = 40
     }
   }
 
@@ -155,11 +180,21 @@ threatmodel "threatcl-drift-action" {
       }
     }
 
-    # The job holding secrets.ANTHROPIC_API_KEY and a pull-requests/checks
-    # write-scoped GITHUB_TOKEN. The engine is built here from source that
-    # crossed in from the untrusted zone above.
+    # Jobs in this repo's workflows that hold a credential. Two of them, on
+    # different triggers with different grants: the review job holds
+    # secrets.ANTHROPIC_API_KEY and a pull-requests/checks write-scoped
+    # GITHUB_TOKEN on pull_request, and the release jobs hold packages: write
+    # and contents: write on a v* tag push.
     trust_zone "Credentialed Actions runner" {
+      # The engine is built here from source that crossed in from the
+      # untrusted zone above.
       process "Drift Review Engine" {
+        trust_zone = "Credentialed Actions runner"
+      }
+
+      # .github/workflows/release.yml: release-image builds and pushes the
+      # container, then major-alias force-moves the v0 tag onto that release.
+      process "Release publisher" {
         trust_zone = "Credentialed Actions runner"
       }
     }
@@ -172,6 +207,16 @@ threatmodel "threatcl-drift-action" {
 
       external_element "Anthropic API" {
         trust_zone = "External APIs"
+      }
+    }
+
+    # Every repo that writes uses: threatcl/drift-action@v0. They never reach
+    # this repository directly — they resolve the floating alias through
+    # GitHub when their workflow starts, so whatever v0 was last force-moved
+    # onto is what runs in their runner.
+    trust_zone "Downstream consumers" {
+      external_element "Consumer Workflow" {
+        trust_zone = "Downstream consumers"
       }
     }
 
@@ -202,6 +247,28 @@ threatmodel "threatcl-drift-action" {
     flow "sticky comment and check run" {
       from = "Drift Review Engine"
       to   = "GitHub API"
+    }
+
+    # release-image: build the container from the tagged source and push it to
+    # ghcr with a packages: write token.
+    flow "container image publish" {
+      from = "Release publisher"
+      to   = "GitHub API"
+    }
+
+    # major-alias: git push origin -f refs/tags/v0 with a contents: write
+    # token. Distinct from the publish above because it rewrites a ref
+    # consumers already resolve, rather than adding a new immutable artifact.
+    flow "major alias tag move" {
+      from = "Release publisher"
+      to   = "GitHub API"
+    }
+
+    # Where the moved alias lands. Nothing in this repo initiates it — the
+    # consumer's own workflow run does, at whatever time it next fires.
+    flow "major alias resolution" {
+      from = "GitHub API"
+      to   = "Consumer Workflow"
     }
   }
 }
