@@ -56,6 +56,26 @@ threatmodel "threatcl-drift-action" {
     }
   }
 
+  threat "PR-authored engine code runs in the privileged dogfooding job" {
+    description            = "The dogfooding workflow .github/workflows/threat-drift.yml triggers on pull_request and runs uses: ./, so the action is built from the PR head — a pull request supplies the engine that reviews it, not just the content being reviewed. That job is granted pull-requests: write and checks: write and is handed secrets.ANTHROPIC_API_KEY, so PR-authored changes to the Dockerfile, the entrypoint or any package under internal/ execute in the runner with the Anthropic key in their environment and a token that can write comments and check runs. The existing 'Prompt injection via PR-controlled diff or context files' threat covers only what a PR puts in the prompt; this covers what a PR puts in the program, which no schema or evidence sanitizer constrains"
+    impacts                = ["Confidentiality", "Integrity"]
+    stride                 = ["Elevation Of Privilege", "Tampering"]
+    information_asset_refs = ["action credentials"]
+
+    control "Fork pull requests receive no secrets" {
+      description    = "GitHub withholds repository secrets from pull_request runs raised from a fork and issues a read-only GITHUB_TOKEN regardless of the workflow's permissions block, so for an untrusted author ANTHROPIC_API_KEY resolves empty and the write grants are inert. Platform behaviour rather than anything this repo enforces, and it does nothing for a branch PR from someone who already has write access — which is who raises every PR here today"
+      implemented    = true
+      risk_reduction = 50
+    }
+
+    control "Pin the workflow to the released action" {
+      description          = "Replace uses: ./ in .github/workflows/threat-drift.yml with the pinned threatcl/drift-action@v0 release so a published engine reviews PRs instead of each PR's own build"
+      implemented          = false
+      implementation_notes = "Blocked on v0.1.0, which does not exist yet; the switch is recorded in a comment in the workflow itself. Until then uses: ./ is deliberate — it makes the job an end-to-end test of the PR's engine, and this control stays unimplemented"
+      risk_reduction       = 60
+    }
+  }
+
   threat "Repo source and diff shared with the LLM provider" {
     ref         = "TCL-T-LLM-DATASHARE"
     description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the Anthropic API as a condition of every review — the files chosen are exactly the ones that back the model's controls and threats"
@@ -122,15 +142,49 @@ threatmodel "threatcl-drift-action" {
   }
 
   data_flow_diagram_v2 "review pipeline" {
-    external_element "PR Author" {}
+    # Everything the PR author controls. The workflow checks out the PR ref and
+    # runs uses: ./, so this zone supplies both the content under review and the
+    # engine binary that reviews it.
+    # Each element repeats its enclosing zone as an attribute. Nesting alone
+    # does not populate it, and the assertion renderer reads the attribute, so
+    # without this the zones list but nothing is attributed to them. Spec
+    # rejects an attribute that disagrees with its enclosing block.
+    trust_zone "PR-author controlled" {
+      external_element "PR Author" {
+        trust_zone = "PR-author controlled"
+      }
+    }
 
-    external_element "GitHub API" {}
+    # The job holding secrets.ANTHROPIC_API_KEY and a pull-requests/checks
+    # write-scoped GITHUB_TOKEN. The engine is built here from source that
+    # crossed in from the untrusted zone above.
+    trust_zone "Credentialed Actions runner" {
+      process "Drift Review Engine" {
+        trust_zone = "Credentialed Actions runner"
+      }
+    }
 
-    external_element "Anthropic API" {}
+    # Where the runner's two credentials are spent.
+    trust_zone "External APIs" {
+      external_element "GitHub API" {
+        trust_zone = "External APIs"
+      }
 
-    process "Drift Review Engine" {}
+      external_element "Anthropic API" {
+        trust_zone = "External APIs"
+      }
+    }
 
     flow "pull request content" {
+      from = "PR Author"
+      to   = "Drift Review Engine"
+    }
+
+    # Distinct from the flow above: not the diff being reviewed, but the
+    # program doing the reviewing. actions/checkout@v6 plus uses: ./ in
+    # .github/workflows/threat-drift.yml builds the container from the PR head,
+    # so this edge carries PR-author-controlled code into the credentialed zone.
+    flow "engine source and container build" {
       from = "PR Author"
       to   = "Drift Review Engine"
     }
