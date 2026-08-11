@@ -77,14 +77,15 @@ threatmodel "threatcl-drift-action" {
   }
 
   threat "Mutable major alias repointed at attacker-chosen code" {
-    description = "Consumers pin uses: threatcl/drift-action@v0, and the major-alias job in .github/workflows/release.yml moves that alias on every vX.Y.Z tag push with git tag -f and git push origin -f. The alias is force-moved rather than immutable, so v0 is a mutable pointer to whichever commit last claimed it — history is rewritten silently and there is no record on the tag of what it used to name. Anyone able to push a vX.Y.Z tag, or to alter .github/workflows/release.yml so the job computes a different target, repoints v0 for every downstream consumer at once; the job's own token is read-only and the push authenticates with a short-lived token minted from the org's release app, guarded by a tag-shape check and an ancestry check that constrain what the alias can be moved onto but not who can trigger the move. Consumers observe nothing: the same @v0 string resolves to different code on their next run, which then executes in their runner with their own secrets and their own PR-write token"
+    description = "Consumers pin uses: threatcl/drift-action@v0, and the major-alias job in .github/workflows/release.yml moves that alias on every vX.Y.Z tag push with git tag -f and git push origin -f. The alias is force-moved rather than immutable, so v0 is a mutable pointer to whichever commit last claimed it — history is rewritten silently and there is no record on the tag of what it used to name. Anyone able to push a vX.Y.Z tag, or to alter .github/workflows/release.yml so the job computes a different target, repoints v0 for every downstream consumer at once; the job's own token is read-only and the push authenticates with a short-lived token minted from the org's release app, guarded by a tag-shape check and an ancestry check that constrain what the alias can be moved onto but not who can trigger the move. Consumers observe nothing: the same @v0 string resolves to different code on their next run, which then executes in their runner with their own secrets and their own PR-write token. Scope: this threat and both its controls are about git refs under refs/tags, and that is now only the first half of the resolution chain — since action.yml line 53 stopped saying image: 'Dockerfile', resolving @v0 to a commit only gets a consumer to an action.yml that names a container image, which is a second mutable pointer with different actors and different guards. Neither the ancestry check nor either tag ruleset reaches a registry tag. That half is modelled separately as 'Container image tag repointed under a released action.yml' — do not read the controls here as covering it"
     impacts     = ["Integrity"]
     stride      = ["Tampering", "Elevation Of Privilege"]
 
     control "Alias moves only onto commits reachable from main" {
-      description    = "The major-alias job in .github/workflows/release.yml refuses the move unless the tagged commit is an ancestor of origin/main (git merge-base --is-ancestor, over a full-history checkout so main is visible — a shallow fetch makes the check fail closed rather than pass). A tag push can carry its own commit, so without this anyone able to push a vX.Y.Z tag could point v0 at code that never appeared in a pull request; with it, a repoint requires the code to have landed on main first. Guards the target of a move, not the trigger — the ruleset control covers who can push the tags at all"
-      implemented    = true
-      risk_reduction = 40
+      description          = "The major-alias job in .github/workflows/release.yml refuses the move unless the tagged commit is an ancestor of origin/main (git merge-base --is-ancestor, over a full-history checkout so main is visible — a shallow fetch makes the check fail closed rather than pass). A tag push can carry its own commit, so without this anyone able to push a vX.Y.Z tag could point v0 at a commit that exists nowhere but the tag itself; with it, the alias can only name code reachable from main. What that guarantees is reachability from main and nothing more — it is not evidence that the code passed a pull request, because reaching main is itself a push the same credential can perform. Guards the target of a move, not the trigger — the ruleset control covers who can push the tags at all"
+      implemented          = true
+      implementation_notes = "The check constrains where a move can land, not how the code got there. Since the 'Mint a release-app token' step (.github/workflows/release.yml lines 67-72) the job authenticates its push with a GitHub App installation token persisted as the checkout credential (line 81), and the sibling 'Tag rulesets restrict release-tag creation and alias moves' control records that app as holding repository-wide contents read-write. contents read-write covers branches, not just tags: a holder of RELEASER_APP_PRIVATE_KEY can mint the same token, push their commit straight to main, then cut the tag — and the ancestry check passes, because by then the commit genuinely is reachable from main. The pull-request gate a reader might infer from 'landed on main' is therefore not something this check provides; it would have to come from a branch ruleset on refs/heads/main requiring review, and no such ruleset exists. Verified 2026-08-11: repos/threatcl/drift-action/rulesets returns exactly two, 'release tags are immutable' and 'major alias moves only from the release workflow', both target: tag, and branches/main/protection returns 404 Branch not protected. So the assumption this guarantee would rest on is currently absent, and the residual is the same one the ruleset control names — secrets access is the moat, and here it buys write access to main as well as to the alias. Adding a main ruleset requiring pull requests, with the release app not on its bypass list, is what would upgrade this control's claim from reachability to review; until then the honest reading is that v0 names code an app-key holder chose, laundered through main"
+      risk_reduction       = 40
     }
 
     control "Tag rulesets restrict release-tag creation and alias moves" {
@@ -92,6 +93,34 @@ threatmodel "threatcl-drift-action" {
       implemented          = true
       implementation_notes = "Both rulesets are active on the repository. 'release tags are immutable' covers refs/tags/v*.*.* with creation, update, deletion and non-fast-forward rules, bypassed only by the repository admin role; 'major alias moves only from the release workflow' covers refs/tags/v0 with creation, update and deletion rules and a single Integration bypass actor — the release app, id 4558032. Admins are deliberately absent from that second list: an emergency manual alias move means editing the ruleset first, which is the audit trail working as intended. The app itself now exists, installed on this repository alone with contents read-write as its only permission, and its credentials are in place as the RELEASER_APP_ID variable and the RELEASER_APP_PRIVATE_KEY secret; the major-alias job in .github/workflows/release.yml mints an installation token from it unconditionally and runs with GITHUB_TOKEN downgraded to contents: read, so the alias push depends entirely on the app and has no fallback — if the app is uninstalled or the key rotated out, the release fails rather than quietly reverting to the Actions identity. Unexercised so far: no tag has been cut, so the mint-and-push path has not yet run against the ruleset. The residual to know: anyone who can read that secret — any workflow run on a non-fork ref — can mint the token and move v0, so the moat is secrets access plus the ancestry check, which still constrains where a move can land"
       risk_reduction       = 50
+    }
+  }
+
+  threat "Container image tag repointed under a released action.yml" {
+    description            = "The sibling threat 'Mutable major alias repointed at attacker-chosen code' covers refs/tags; this covers the link below it. Resolving uses: threatcl/drift-action@v0 to a commit no longer settles what runs, because that commit's action.yml names an image on ghcr rather than a Dockerfile to build. A ghcr tag is a mutable pointer exactly as a git tag is: anyone holding packages: write on this package can push a different manifest under the same tag, silently and with no record of what it used to name, and every consumer whose next run pulls that tag executes it with their own secrets and their own PR-write token. The git-ref controls do not reach it — the ancestry check inspects commits, and both rulesets target refs/tags — so a released, ruleset-protected, immutable git tag can still resolve to attacker-chosen code. docs/RELEASING.md accepts this residual deliberately for steady-state releases: a digest can only name an image that already exists and the release order tags the commit before the image is built, so every release after the v0.1.1 bootstrap pins :vX.Y.Z rather than a digest. Two things widen it. The docker/metadata-action step in .github/workflows/release.yml runs with flavor: latest=true, so latest is moved on every publish and names whatever published most recently rather than the newest version. And because that workflow triggers on 'v*' while its major-alias job pushes refs/tags/v0, the alias move re-triggers the workflow and publishes again — so the registry carries a mutable v0 image tag too, rebuilt from source on each alias move rather than being the artifact any release tested. Verified 2026-08-11 against ghcr: tags are v0.1.0, v0.1.1, v0 and latest; v0.1.0 is sha256:0f1807a1, the digest action.yml pins; v0.1.1 is sha256:6901212f; v0 and latest are both sha256:3b27afaa, a third image belonging to no version tag"
+    impacts                = ["Integrity"]
+    stride                 = ["Tampering", "Elevation Of Privilege"]
+    information_asset_refs = ["action credentials"]
+
+    control "Engine image pinned by digest in action.yml" {
+      description          = "action.yml line 53 names docker://ghcr.io/threatcl/drift-action@sha256:0f1807a1 rather than a version tag. A digest names one immutable manifest and the runner rejects anything else, so repointing a ghcr tag cannot change what the shipped action pulls. True of the file as it stands and of nothing else — it does not generalise to the next release"
+      implemented          = true
+      implementation_notes = "Implemented for v0.1.1 only, and by accident of the bootstrap rather than by process. docs/RELEASING.md step 4 could digest-pin because it names the already-published v0.1.0 image, which was legitimate because that release changed no engine code — the binary is identical and the threat model and config are read from the workspace at runtime. Steady-state releases cannot do it: the commit is tagged before its image exists, so there is no digest to name, and the documented steady-state instruction is to pin :vX.Y.Z. So this control is scheduled to become false at v0.1.2 unless something changes it, and the thing that would change it is a publish-before-tag release flow — build and push the image, read back its digest, commit that digest into action.yml, then tag. That is a rewrite of the ordering in .github/workflows/release.yml, not a config change, and it is not planned. Until then, read this control as covering the currently released action and treat the version-tag pin as the steady-state posture that the remaining controls have to hold up"
+      risk_reduction       = 70
+    }
+
+    control "packages: write is granted to one job and nothing else" {
+      description          = ".github/workflows/release.yml sets a workflow-level permissions block of contents: read and adds packages: write only on the release-image job, so no other job in the repository holds a token that can push to the package. The push authenticates with that job's GITHUB_TOKEN — no long-lived registry credential is stored as a secret, so there is nothing to leak that would survive the run"
+      implemented          = true
+      implementation_notes = "This is least privilege within the workflows that exist, not a restriction on who can obtain the grant. Any new workflow file can request packages: write for itself, and the repository's own package inherits repository permissions by default, so the moat here is repository write access rather than anything package-specific — the same moat, and roughly the same set of people, as the release-tag rulesets. Unverified from this checkout: who else can push, and whether the package still has 'Inherit access from repository' set or has been given explicit collaborators. gh api /orgs/threatcl/packages/container/drift-action returns 403 without the read:packages scope, which the local gh token lacks; checking it needs a token with that scope or the package settings page. Worth doing once — a package granted to a person or an app outside this repository would move the moat without anything in the repository recording it"
+      risk_reduction       = 30
+    }
+
+    control "Immutable ghcr tags" {
+      description          = "Make published tags non-rewritable at the registry, so a version tag cannot be repointed at a different manifest once it names one. This is what would let a steady-state :vX.Y.Z pin carry the same weight as a digest, and is the only one of these controls that fixes the residual rather than working around it"
+      implemented          = false
+      implementation_notes = "Not configured, and not yet established as available. GitHub's immutability guarantees are documented for actions and for tag rulesets over git refs; whether ghcr exposes an equivalent rule for container tags on an org-owned package needs checking against current docs and the package settings before this is treated as a plannable task rather than a wish — the same 403 that blocks the sibling control blocks reading the current setting. If it exists, it also has to tolerate the two moving tags this repository publishes today: latest, moved on every run by flavor: latest=true, and the v0 image tag republished by the alias-move-retriggers-release loop. Both would need to be excluded or stopped, and stopping them is arguably the better half of the fix — neither is referenced by action.yml, by docs/RELEASING.md or by any documented consumer path, so they are mutable pointers this repository publishes and nothing it ships relies on"
+      risk_reduction       = 60
     }
   }
 
@@ -179,6 +208,12 @@ threatmodel "threatcl-drift-action" {
     uptime_dependency = "hard"
   }
 
+  third_party_dependency "GitHub Container Registry (ghcr.io)" {
+    description       = "Where the engine image lives, and — since action.yml line 53 replaced image: 'Dockerfile' with docker://ghcr.io/threatcl/drift-action@sha256:0f1807a1 — where every run of this action gets its program. The runner pulls that image before the entrypoint exists, so a registry outage, a deleted package or a revoked pull grant fails the review before any code of ours runs, with nothing to fall back on: the Dockerfile in the consumer's workspace is no longer built, so there is no local path to an engine. That is the trade for a pull measured in seconds rather than a per-run container build. This release pins by digest rather than by tag, so the registry is trusted for availability but not for integrity — a ghcr tag is a mutable pointer anyone with packages: write can repoint silently, while a digest names one immutable manifest and the runner rejects anything else. Steady-state releases cannot pin a digest (the image does not exist when the commit is tagged) and pin the version tag instead, which puts registry integrity back in scope; see docs/RELEASING.md. Distinct from the 'GitHub API' dependency: same vendor, different surface and different failure mode — that one is the diff and the comment, this one is whether the action starts at all"
+    saas              = true
+    uptime_dependency = "hard"
+  }
+
   third_party_dependency "GitHub App token minting (actions/create-github-app-token)" {
     description       = "The major-alias job in .github/workflows/release.yml mints a short-lived installation token from the org's release app with the 'Mint a release-app token' step, feeding it vars.RELEASER_APP_ID and secrets.RELEASER_APP_PRIVATE_KEY. That token is persisted as the checkout push credential and is what performs git push origin -f refs/tags/v0 — the release-tag ruleset bypass names the app, so nothing else in the workflow can move the alias. The action is currently pinned to the mutable @v2 major tag while receiving the private key: whoever controls what @v2 resolves to sees the app's signing key and can mint alias-moving tokens at will, which is the same mutable-pin exposure reasoned about in the 'Mutable major alias repointed at attacker-chosen code' threat, one level up the supply chain. Only the release workflow depends on it — a PR review never mints a token"
     saas              = true
@@ -231,6 +266,16 @@ threatmodel "threatcl-drift-action" {
         trust_zone = "External APIs"
       }
 
+      # ghcr.io, where the engine image is published and from where every run
+      # now pulls it. Modelled apart from "GitHub API" because it is a
+      # different surface with a different failure mode — that element carries
+      # the diff and the comment, this one decides whether the action starts —
+      # and because the release publisher writes here while every consumer
+      # runner reads.
+      external_element "GitHub Container Registry" {
+        trust_zone = "External APIs"
+      }
+
       # The org-owned GitHub App whose installation token moves the v0 alias.
       # Modelled separately from "GitHub API" because it is a distinct
       # identity with its own grant (contents read-write on this repository
@@ -262,11 +307,28 @@ threatmodel "threatcl-drift-action" {
     # program doing the reviewing. This edge used to run from PR Author —
     # uses: ./ built the container from the PR head — and the SHA pin in
     # .github/workflows/threat-drift.yml moved its source to fixed, released
-    # content fetched from GitHub. Today that is the pinned repository tree,
-    # which v0.1.0's action.yml still builds from its Dockerfile; once the pin
-    # advances past v0.1.1 it is the published image pulled from ghcr.
+    # content fetched from GitHub. What crosses here is the pinned repository
+    # tree: action.yml and the workspace files the engine reads at runtime.
+    # Through v0.1.0 it was also the engine itself, because that action.yml
+    # said image: 'Dockerfile' and the runner built the container from this
+    # tree. It no longer is — v0.1.1's action.yml names a ghcr image, so the
+    # program arrives over the "engine image pull" flow below and this edge
+    # carries only the tree. The dogfooding workflow still pins v0.1.0, so it
+    # keeps building until that pin advances.
     flow "pinned engine fetch" {
       from = "GitHub API"
+      to   = "Drift Review Engine"
+    }
+
+    # The runner pulling docker://ghcr.io/threatcl/drift-action, pinned by
+    # digest at action.yml line 53, before the entrypoint exists. This is how
+    # the engine binary reaches the credentialed zone now that no Dockerfile
+    # is built in the consumer's workspace, which makes the registry a hard
+    # dependency of every run and this the edge on which that failure lands.
+    # The digest pin is what bounds its integrity: the runner will accept only
+    # one manifest, so a repointed ghcr tag cannot change what crosses here.
+    flow "engine image pull" {
+      from = "GitHub Container Registry"
       to   = "Drift Review Engine"
     }
 
@@ -286,10 +348,12 @@ threatmodel "threatcl-drift-action" {
     }
 
     # release-image: build the container from the tagged source and push it to
-    # ghcr with a packages: write token.
+    # ghcr with a packages: write token. Retargeted from "GitHub API" onto the
+    # registry element now that one exists — this is the write side of the
+    # same surface every run reads over "engine image pull" above.
     flow "container image publish" {
       from = "Release publisher"
-      to   = "GitHub API"
+      to   = "GitHub Container Registry"
     }
 
     # major-alias, before the checkout: actions/create-github-app-token@v2
