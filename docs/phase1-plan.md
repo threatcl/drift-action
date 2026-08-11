@@ -1,8 +1,12 @@
 # drift-action — Phase 1 plan
 
-**Status:** the pipeline below runs end to end, inference included. What is
-left is validating finding quality on a corpus, wiring the check-run
-conclusion to `fail_mode`, and cutting a release.
+**Status:** everything below is built and proven. The pipeline runs end to
+end, the check-run conclusion is wired to `fail_mode`, and finding quality is
+validated two ways: a seven-case corpus under `testdata/corpus/` (one per
+category plus a clean case that must stay clean), and live dogfooding on this
+repo's own pull requests — where the action found real gaps in its own threat
+model, the agent-prompt handoff fixed them, and the re-review came back clean.
+What is left is cutting the release; see `RELEASING.md`.
 
 ## What this is
 
@@ -63,7 +67,9 @@ shared with the claude-plugin (see `prompts/`):
    dropped before rendering. → `internal/render`, `internal/gh`
 
 v0 ships the Anthropic provider only, behind `internal/llm.Provider`; other
-providers follow once finding quality is validated.
+providers follow once finding quality is validated. That gate is now met, so
+a second provider is unblocked — the corpus harness is how one earns its
+place, by passing the same seven cases under its own recordings.
 
 ## PR output
 

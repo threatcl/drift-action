@@ -143,11 +143,24 @@ the collapsed context block is never the only disclosure), context files are
 sent with `N→` line-number prefixes (citations were landing 1–3 lines off
 from hunk-header arithmetic), and the severity rules gained a
 partial-contradiction rule (still-true-but-incomplete assertions are
-`review_recommended`, so `fail_mode` can't flip on judgement wobble). The
-prompt changes make the recorded request digests stale — replay still works
-and logs it — so the next `record` run re-baselines and measures them.
-Remaining: the `docker://` release switch — `.github/workflows/release.yml`
-already pushes to ghcr on `v*` tags. See the plan file.
+`review_recommended`, so `fail_mode` can't flip on judgement wobble). Those
+three were then re-recorded and measured on the corpus: citations landed
+exactly, and dfd-drift went from three build-failing findings to one.
+
+Dogfooding is live and the loop closed on PR #8: the action reviewed the PR
+that switched it on, found two real gaps in this repo's own threat model,
+the agent prompts remediated them in a separate session, and the re-review
+came back `no_drift` with a `success` check run — the conclusion reserved for
+a run that actually assessed and found consistency. Milestone 3 is therefore
+done except for the release itself.
+
+Release mechanics are staged but **not yet cut** — no tag exists. `ci.yml`
+runs the corpus replay, `release.yml` publishes the ghcr image on `v*` and
+moves the `v0` alias consumers pin, and `docs/RELEASING.md` holds the
+procedure. The first release is a deliberate two-tag bootstrap (v0.1.0
+publishes an image while `action.yml` still says `Dockerfile`; v0.1.1 flips
+to `docker://` and pins the dogfood workflow) — read RELEASING.md before
+tagging, the ordering is load-bearing.
 
 ## Open items
 
@@ -163,9 +176,18 @@ already pushes to ghcr on `v*` tags. See the plan file.
   path must exist), `.threatcl-ci.hcl` with `trigger_paths = ["prompts/"]`
   (`.md` is filter noise, but prompt edits change the reviewer itself), and
   `.github/workflows/threat-drift.yml` using `uses: ./` until v0.1.0 — switch
-  to the pinned release then. Needs the `ANTHROPIC_API_KEY` repo secret.
-  Spec's DFD slugifier splits every capital (`PR Author` → `p_r_author`), so
-  the DFD flows use quoted-name refs instead of dot notation.
+  to the pinned release then, and flip the "Pin the workflow to the released
+  action" control to `implemented = true` in the same commit or the action
+  will report a phantom control against its own model. Spec's DFD slugifier
+  splits every capital (`PR Author` → `p_r_author`), so the DFD flows use
+  quoted-name refs instead of dot notation.
+- A second provider (OpenAI) is unblocked now that finding quality is
+  validated, and is the v0.2.0 candidate. It earns its place by passing the
+  same seven corpus cases under its own recordings — the harness currently
+  hardcodes the Anthropic constructor, so it needs parameterising by provider
+  first. Structured-outputs shape, refusal signalling and the absence of a
+  server-side-fallback equivalent all differ; `ReviewResult.Fallback` stays
+  Anthropic-only.
 
 ## Siblings
 

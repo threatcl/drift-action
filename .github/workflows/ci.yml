@@ -22,6 +22,16 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go test ./...
 
+      # Replay the recorded corpus reviews. Free and offline, and the only
+      # check that speaks to finding quality rather than to whether the code
+      # runs: a change that breaks how findings are produced fails here
+      # instead of on someone's pull request. -v so a recording that no
+      # longer matches the assembled prompt announces itself in the log.
+      - name: corpus replay
+        env:
+          THREATCL_DRIFT_CORPUS: replay
+        run: go test ./internal/corpus -v
+
   lint:
     runs-on: ubuntu-latest
     steps:
