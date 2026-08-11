@@ -89,8 +89,8 @@ threatmodel "threatcl-drift-action" {
 
     control "Tag rulesets restrict release-tag creation and alias moves" {
       description          = "Two repository rulesets: refs/tags v*.*.* release tags are create-only — no update, no delete — with creation restricted to repository admins, and refs/tags v0 is creatable and movable only by the org's dedicated release app, whose short-lived token the major-alias job in .github/workflows/release.yml mints for the push. GitHub refuses to put the Actions identity itself on a bypass list — deliberately, since that would admit every workflow in the repo — and the refusal forces the stricter design: bypass names one installed app rather than a runner identity. Guards the trigger of a move and complements the ancestry check, which guards the target"
-      implemented          = false
-      implementation_notes = "Half applied: the release-tags ruleset is active on the repository. The v0 ruleset waits on the release app existing — create a minimal org-owned GitHub App with contents read-write as its only permission, install it on this repository alone, set its id as the RELEASER_APP_ID Actions variable and its private key as the RELEASER_APP_PRIVATE_KEY secret, then apply the drafted v0 payload with the app's id as the Integration bypass actor and flip this to implemented. The residual to know: anyone who can read that secret — any workflow run on a non-fork ref — can mint the token and move v0, so the moat is secrets access plus the ancestry check, which still constrains where a move can land. Admins are deliberately absent from the bypass list: an emergency manual move means editing the ruleset first, which is the audit trail working as intended"
+      implemented          = true
+      implementation_notes = "Both rulesets are active on the repository. 'release tags are immutable' covers refs/tags/v*.*.* with creation, update, deletion and non-fast-forward rules, bypassed only by the repository admin role; 'major alias moves only from the release workflow' covers refs/tags/v0 with creation, update and deletion rules and a single Integration bypass actor — the release app, id 4558032. Admins are deliberately absent from that second list: an emergency manual alias move means editing the ruleset first, which is the audit trail working as intended. The app itself now exists, installed on this repository alone with contents read-write as its only permission, and its credentials are in place as the RELEASER_APP_ID variable and the RELEASER_APP_PRIVATE_KEY secret; the major-alias job in .github/workflows/release.yml mints an installation token from it unconditionally and runs with GITHUB_TOKEN downgraded to contents: read, so the alias push depends entirely on the app and has no fallback — if the app is uninstalled or the key rotated out, the release fails rather than quietly reverting to the Actions identity. Unexercised so far: no tag has been cut, so the mint-and-push path has not yet run against the ruleset. The residual to know: anyone who can read that secret — any workflow run on a non-fork ref — can mint the token and move v0, so the moat is secrets access plus the ancestry check, which still constrains where a move can land"
       risk_reduction       = 50
     }
   }
@@ -177,6 +177,12 @@ threatmodel "threatcl-drift-action" {
     description       = "Source of the PR diff via the compare endpoint, and the write surface for the sticky comment and check run"
     saas              = true
     uptime_dependency = "hard"
+  }
+
+  third_party_dependency "GitHub App token minting (actions/create-github-app-token)" {
+    description       = "The major-alias job in .github/workflows/release.yml mints a short-lived installation token from the org's release app with the 'Mint a release-app token' step, feeding it vars.RELEASER_APP_ID and secrets.RELEASER_APP_PRIVATE_KEY. That token is persisted as the checkout push credential and is what performs git push origin -f refs/tags/v0 — the release-tag ruleset bypass names the app, so nothing else in the workflow can move the alias. The action is currently pinned to the mutable @v2 major tag while receiving the private key: whoever controls what @v2 resolves to sees the app's signing key and can mint alias-moving tokens at will, which is the same mutable-pin exposure reasoned about in the 'Mutable major alias repointed at attacker-chosen code' threat, one level up the supply chain. Only the release workflow depends on it — a PR review never mints a token"
+    saas              = true
+    uptime_dependency = "operational"
   }
 
   data_flow_diagram_v2 "review pipeline" {
