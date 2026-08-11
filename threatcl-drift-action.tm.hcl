@@ -27,7 +27,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   information_asset "action credentials" {
-    description                = "The Anthropic API key and GitHub token the action holds at runtime; the token carries PR write permission. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, and a contents: write token in the major-alias job that can create and force-move tags in this repository — including the floating v0 alias consumers resolve"
+    description                = "The Anthropic API key and GitHub token the action holds at runtime; the token carries PR write permission. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, the RELEASER_APP_PRIVATE_KEY GitHub App private key secret and the RELEASER_APP_ID variable identifying the app, and the short-lived installation token minted from them by actions/create-github-app-token@v2 in the major-alias job — that job's own GITHUB_TOKEN is contents: read, and it is the installation token, persisted as the checkout push credential, that can create and force-move tags in this repository, including the floating v0 alias consumers resolve. Any workflow run on a non-fork ref that can read RELEASER_APP_PRIVATE_KEY can mint that token"
     information_classification = "Restricted"
   }
 
@@ -196,8 +196,10 @@ threatmodel "threatcl-drift-action" {
     # Jobs in this repo's workflows that hold a credential. Two of them, on
     # different triggers with different grants: the review job holds
     # secrets.ANTHROPIC_API_KEY and a pull-requests/checks write-scoped
-    # GITHUB_TOKEN on pull_request, and the release jobs hold packages: write
-    # and contents: write on a v* tag push.
+    # GITHUB_TOKEN on pull_request, and the release jobs run on a v* tag push —
+    # release-image with packages: write, major-alias with GITHUB_TOKEN at
+    # contents: read plus the RELEASER_APP_PRIVATE_KEY secret it exchanges for
+    # a write-capable app installation token.
     trust_zone "Credentialed Actions runner" {
       # The engine is built here from source that crossed in from the
       # untrusted zone above.
@@ -212,13 +214,25 @@ threatmodel "threatcl-drift-action" {
       }
     }
 
-    # Where the runner's two credentials are spent.
+    # Where the runner's credentials are spent, and — for the release app —
+    # where one of them is obtained.
     trust_zone "External APIs" {
       external_element "GitHub API" {
         trust_zone = "External APIs"
       }
 
       external_element "Anthropic API" {
+        trust_zone = "External APIs"
+      }
+
+      # The org-owned GitHub App whose installation token moves the v0 alias.
+      # Modelled separately from "GitHub API" because it is a distinct
+      # identity with its own grant (contents read-write on this repository
+      # alone) and its own credential — RELEASER_APP_PRIVATE_KEY, held as a
+      # repository secret, plus the RELEASER_APP_ID variable. It is the only
+      # actor the refs/tags v0 ruleset lets bypass, which is why the runner
+      # identity's own token cannot make the push.
+      external_element "Release App" {
         trust_zone = "External APIs"
       }
     }
@@ -269,8 +283,32 @@ threatmodel "threatcl-drift-action" {
       to   = "GitHub API"
     }
 
-    # major-alias: git push origin -f refs/tags/v0 with a contents: write
-    # token. Distinct from the publish above because it rewrites a ref
+    # major-alias, before the checkout: actions/create-github-app-token@v2
+    # signs a JWT with secrets.RELEASER_APP_PRIVATE_KEY for the app named by
+    # vars.RELEASER_APP_ID and exchanges it for an installation token
+    # (.github/workflows/release.yml, the "Mint a release-app token" step).
+    # The private key never leaves the runner; what crosses back is a
+    # short-lived token, drawn as its own flow below.
+    flow "release-app token mint" {
+      from = "Release publisher"
+      to   = "Release App"
+    }
+
+    # The minted token entering the credentialed zone, where the checkout
+    # persists it as the push credential. This is the edge that upgrades the
+    # job from contents: read to a ref-writing identity, so the release app's
+    # grant — not the runner's permissions block — is what bounds the push
+    # below.
+    flow "installation token issue" {
+      from = "Release App"
+      to   = "Release publisher"
+    }
+
+    # major-alias: git push origin -f refs/tags/v0. Authenticated with the
+    # app installation token above rather than the runner's GITHUB_TOKEN,
+    # which is contents: read here — the refs/tags v0 ruleset admits only the
+    # release app, and GitHub refuses to put the Actions identity on a bypass
+    # list. Distinct from the publish above because it rewrites a ref
     # consumers already resolve, rather than adding a new immutable artifact.
     flow "major alias tag move" {
       from = "Release publisher"
