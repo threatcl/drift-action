@@ -104,3 +104,7 @@ a fine way to find out, but a worse way than remembering.
       (steady state — the v0.1.1 flip digest-pins the v0.1.0 image instead)
 - [ ] the README's inputs and outputs tables match `action.yml`
 - [ ] `prompts/upstream/SOURCE` is current if the prompt was re-vendored
+- [ ] the `RELEASER_APP_ID` variable and `RELEASER_APP_PRIVATE_KEY` secret
+      exist — the `major-alias` job pushes `v0` with a token minted from the
+      release app, because the tag ruleset lets only that app move the alias.
+      Without them the release publishes but the alias never moves

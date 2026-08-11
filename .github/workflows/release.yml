@@ -57,15 +57,28 @@ jobs:
     # a release whose image failed to publish. Hence `needs`.
     needs: release-image
     permissions:
-      contents: write
+      # Read, deliberately: the ruleset guarding refs/tags/v0 lets only the
+      # release app move the alias (GitHub refuses to put the Actions
+      # identity itself on a bypass list), so the push below authenticates
+      # with a token minted from that app — GITHUB_TOKEN needs no write.
+      contents: read
     runs-on: ubuntu-latest
     steps:
+      - name: Mint a release-app token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.RELEASER_APP_ID }}
+          private-key: ${{ secrets.RELEASER_APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v7
         with:
           # The ancestry check below needs main's history, not just the
           # tagged commit. If someone later trims this back to a shallow
           # fetch, origin/main stops resolving and the check fails closed.
           fetch-depth: 0
+          # Persist the app token as the push credential, not GITHUB_TOKEN.
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Move the major alias to this release
         run: |
