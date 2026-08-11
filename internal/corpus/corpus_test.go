@@ -45,6 +45,35 @@ import (
 // skips inference entirely, so `go test ./...` never costs money.
 const modeEnv = "THREATCL_DRIFT_CORPUS"
 
+// TestRepoThreatModel guards this repository's own dogfooding: the root
+// threat model must always load through the engine, and every file its prose
+// references must exist — those references are what context stuffing and
+// narrowing survival hang off, so a rename that orphans one quietly weakens
+// the action's review of its own PRs.
+func TestRepoThreatModel(t *testing.T) {
+	root := filepath.Join("..", "..")
+	assertions, err := model.Load(filepath.Join(root, "threatcl-drift-action.tm.hcl"))
+	if err != nil {
+		t.Fatalf("the repo's own threat model does not load: %v", err)
+	}
+
+	summary := assertions.Summary()
+	if summary.Threats == 0 || summary.Controls == 0 {
+		t.Errorf("summary came back empty: %s", summary)
+	}
+
+	refs := assertions.ReferencedPaths()
+	t.Logf("prose-referenced paths (context-stuffing triggers): %v", refs)
+	if len(refs) == 0 {
+		t.Error("the model's prose references no files, so context stuffing can never engage on this repo")
+	}
+	for _, ref := range refs {
+		if _, err := os.Stat(filepath.Join(root, ref)); err != nil {
+			t.Errorf("the model references %s, which does not exist — update the threat model alongside the rename", ref)
+		}
+	}
+}
+
 // expectation is one case's expected.json.
 type expectation struct {
 	Description string            `json:"description"`

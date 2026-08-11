@@ -43,14 +43,14 @@ threatmodel "threatcl-drift-action" {
 
     control "Schema-forced JSON and evidence sanitization" {
       ref            = "TCL-C-LLM-SCHEMA"
-      description    = "Output must validate against the findings-v0 schema; findings.Sanitize drops evidence-free findings in code, not just in the prompt"
+      description    = "Output must validate against the findings-v0 schema in internal/findings/validate.go; findings.Sanitize in internal/findings/schema.go drops evidence-free findings in code, not just in the prompt"
       implemented    = true
       risk_reduction = 40
     }
 
     control "Model output reaches only the report body" {
       ref            = "TCL-C-LLM-CONTAIN"
-      description    = "LLM output influences nothing but the rendered comment body; inference error text never reaches the comment"
+      description    = "LLM output influences nothing but the rendered comment body built in internal/render/comment.go; inference error text never reaches the comment (failureKind in cmd/drift-action/main.go)"
       implemented    = true
       risk_reduction = 70
     }
@@ -70,7 +70,7 @@ threatmodel "threatcl-drift-action" {
 
     control "Above-the-fold coverage warnings" {
       ref            = "TCL-C-LLM-PROVENANCE"
-      description    = "writeWarnings renders every coverage gap (narrowing, empty review set, missing patches, size cap) before the collapsed context block; a collapsed details block is never the only disclosure"
+      description    = "writeWarnings in internal/render/comment.go renders every coverage gap (narrowing, empty review set, missing patches, size cap) before the collapsed context block; a collapsed details block is never the only disclosure"
       implemented    = true
       risk_reduction = 70
     }
@@ -83,7 +83,7 @@ threatmodel "threatcl-drift-action" {
 
     control "Replay disclosure and schema re-validation" {
       ref            = "TCL-C-LLM-PROVENANCE"
-      description    = "Replayed runs set ContextInfo.Replayed, rendering an above-the-fold warning, and the recorded report is re-validated against the findings schema — a fixture is never trusted more than a live response"
+      description    = "Replayed runs set ContextInfo.Replayed, rendering an above-the-fold warning, and internal/llm/fixture/fixture.go re-validates the recorded report against the findings schema — a fixture is never trusted more than a live response"
       implemented    = true
       risk_reduction = 60
     }
@@ -103,9 +103,51 @@ threatmodel "threatcl-drift-action" {
     stride      = ["Repudiation", "Denial Of Service"]
 
     control "Refusal, truncation and fallback handling" {
-      description    = "stop_reason is checked before content is read and a refusal renders as could-not-assess, never no-drift; truncation is a hard error, never a half-review; fallbacks are detected from usage.iterations and the comment names the model that actually served the review"
+      description    = "internal/llm/anthropic/anthropic.go checks stop_reason before content is read and a refusal renders as could-not-assess, never no-drift; truncation is a hard error, never a half-review; fallbacks are detected from usage.iterations and the comment names the model that actually served the review"
       implemented    = true
       risk_reduction = 60
+    }
+  }
+
+  third_party_dependency "Anthropic API" {
+    description       = "Hosted LLM inference for every review; receives the repository source excerpts and diff described by the 'repository source code' asset. The only inference provider in v0"
+    saas              = true
+    uptime_dependency = "hard"
+  }
+
+  third_party_dependency "GitHub API" {
+    description       = "Source of the PR diff via the compare endpoint, and the write surface for the sticky comment and check run"
+    saas              = true
+    uptime_dependency = "hard"
+  }
+
+  data_flow_diagram_v2 "review pipeline" {
+    external_element "PR Author" {}
+
+    external_element "GitHub API" {}
+
+    external_element "Anthropic API" {}
+
+    process "Drift Review Engine" {}
+
+    flow "pull request content" {
+      from = "PR Author"
+      to   = "Drift Review Engine"
+    }
+
+    flow "diff and context fetch" {
+      from = "GitHub API"
+      to   = "Drift Review Engine"
+    }
+
+    flow "review request with repo source" {
+      from = "Drift Review Engine"
+      to   = "Anthropic API"
+    }
+
+    flow "sticky comment and check run" {
+      from = "Drift Review Engine"
+      to   = "GitHub API"
     }
   }
 }
