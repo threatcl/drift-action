@@ -27,7 +27,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   information_asset "action credentials" {
-    description                = "The Anthropic API key and GitHub token the action holds at runtime; the token carries PR write permission. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, and a contents: write token in the major-alias job that can create and force-move tags in this repository — including the floating v0 alias consumers resolve"
+    description                = "The Anthropic API key and GitHub token the action holds at runtime; the token carries PR write permission. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, the RELEASER_APP_PRIVATE_KEY GitHub App private key secret and the RELEASER_APP_ID variable identifying the app, and the short-lived installation token minted from them by actions/create-github-app-token@v2 in the major-alias job — that job's own GITHUB_TOKEN is contents: read, and it is the installation token, persisted as the checkout push credential, that can create and force-move tags in this repository, including the floating v0 alias consumers resolve. Any workflow run on a non-fork ref that can read RELEASER_APP_PRIVATE_KEY can mint that token"
     information_classification = "Restricted"
   }
 
@@ -77,7 +77,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   threat "Mutable major alias repointed at attacker-chosen code" {
-    description = "Consumers pin uses: threatcl/drift-action@v0, and the major-alias job in .github/workflows/release.yml moves that alias on every vX.Y.Z tag push with git tag -f and git push origin -f. The alias is force-moved rather than immutable, so v0 is a mutable pointer to whichever commit last claimed it — history is rewritten silently and there is no record on the tag of what it used to name. Anyone able to push a vX.Y.Z tag, or to alter .github/workflows/release.yml so the job computes a different target, repoints v0 for every downstream consumer at once; the job runs with contents: write, guarded by a tag-shape check and an ancestry check that constrain what the alias can be moved onto but not who can trigger the move. Consumers observe nothing: the same @v0 string resolves to different code on their next run, which then executes in their runner with their own secrets and their own PR-write token"
+    description = "Consumers pin uses: threatcl/drift-action@v0, and the major-alias job in .github/workflows/release.yml moves that alias on every vX.Y.Z tag push with git tag -f and git push origin -f. The alias is force-moved rather than immutable, so v0 is a mutable pointer to whichever commit last claimed it — history is rewritten silently and there is no record on the tag of what it used to name. Anyone able to push a vX.Y.Z tag, or to alter .github/workflows/release.yml so the job computes a different target, repoints v0 for every downstream consumer at once; the job's own token is read-only and the push authenticates with a short-lived token minted from the org's release app, guarded by a tag-shape check and an ancestry check that constrain what the alias can be moved onto but not who can trigger the move. Consumers observe nothing: the same @v0 string resolves to different code on their next run, which then executes in their runner with their own secrets and their own PR-write token"
     impacts     = ["Integrity"]
     stride      = ["Tampering", "Elevation Of Privilege"]
 
@@ -88,9 +88,9 @@ threatmodel "threatcl-drift-action" {
     }
 
     control "Tag rulesets restrict release-tag creation and alias moves" {
-      description          = "Two repository rulesets: refs/tags v*.*.* release tags are create-only — no update, no delete — with creation restricted to repository admins, and refs/tags v0 is creatable and movable only by the GitHub Actions app, so the alias follows a release workflow run rather than any writer's direct push. Guards the trigger of a move and complements the ancestry check, which guards the target"
-      implemented          = false
-      implementation_notes = "The two JSON payloads are drafted; apply each with gh api repos/threatcl/drift-action/rulesets -X POST --input <payload>, or recreate them in Settings > Rules > Rulesets, then flip this to implemented. Two limits to know. Bypass is granted to the GitHub Actions app as a whole, so any workflow in this repo with contents: write can still move v0 — the ancestry check backstops exactly that path. And ruleset enforcement on a private repository requires a paid org plan, so on the free tier this cannot enforce until the repo is public — which the missing threatcl/spec LICENSE currently blocks. Admins are deliberately absent from the v0 bypass list: an emergency manual move means editing the ruleset first, which is the audit trail working as intended"
+      description          = "Two repository rulesets: refs/tags v*.*.* release tags are create-only — no update, no delete — with creation restricted to repository admins, and refs/tags v0 is creatable and movable only by the org's dedicated release app, whose short-lived token the major-alias job in .github/workflows/release.yml mints for the push. GitHub refuses to put the Actions identity itself on a bypass list — deliberately, since that would admit every workflow in the repo — and the refusal forces the stricter design: bypass names one installed app rather than a runner identity. Guards the trigger of a move and complements the ancestry check, which guards the target"
+      implemented          = true
+      implementation_notes = "Both rulesets are active on the repository. 'release tags are immutable' covers refs/tags/v*.*.* with creation, update, deletion and non-fast-forward rules, bypassed only by the repository admin role; 'major alias moves only from the release workflow' covers refs/tags/v0 with creation, update and deletion rules and a single Integration bypass actor — the release app, id 4558032. Admins are deliberately absent from that second list: an emergency manual alias move means editing the ruleset first, which is the audit trail working as intended. The app itself now exists, installed on this repository alone with contents read-write as its only permission, and its credentials are in place as the RELEASER_APP_ID variable and the RELEASER_APP_PRIVATE_KEY secret; the major-alias job in .github/workflows/release.yml mints an installation token from it unconditionally and runs with GITHUB_TOKEN downgraded to contents: read, so the alias push depends entirely on the app and has no fallback — if the app is uninstalled or the key rotated out, the release fails rather than quietly reverting to the Actions identity. Unexercised so far: no tag has been cut, so the mint-and-push path has not yet run against the ruleset. The residual to know: anyone who can read that secret — any workflow run on a non-fork ref — can mint the token and move v0, so the moat is secrets access plus the ancestry check, which still constrains where a move can land"
       risk_reduction       = 50
     }
   }
@@ -179,6 +179,12 @@ threatmodel "threatcl-drift-action" {
     uptime_dependency = "hard"
   }
 
+  third_party_dependency "GitHub App token minting (actions/create-github-app-token)" {
+    description       = "The major-alias job in .github/workflows/release.yml mints a short-lived installation token from the org's release app with the 'Mint a release-app token' step, feeding it vars.RELEASER_APP_ID and secrets.RELEASER_APP_PRIVATE_KEY. That token is persisted as the checkout push credential and is what performs git push origin -f refs/tags/v0 — the release-tag ruleset bypass names the app, so nothing else in the workflow can move the alias. The action is currently pinned to the mutable @v2 major tag while receiving the private key: whoever controls what @v2 resolves to sees the app's signing key and can mint alias-moving tokens at will, which is the same mutable-pin exposure reasoned about in the 'Mutable major alias repointed at attacker-chosen code' threat, one level up the supply chain. Only the release workflow depends on it — a PR review never mints a token"
+    saas              = true
+    uptime_dependency = "operational"
+  }
+
   data_flow_diagram_v2 "review pipeline" {
     # Everything the PR author controls. The workflow checks out the PR ref and
     # runs uses: ./, so this zone supplies both the content under review and the
@@ -196,8 +202,10 @@ threatmodel "threatcl-drift-action" {
     # Jobs in this repo's workflows that hold a credential. Two of them, on
     # different triggers with different grants: the review job holds
     # secrets.ANTHROPIC_API_KEY and a pull-requests/checks write-scoped
-    # GITHUB_TOKEN on pull_request, and the release jobs hold packages: write
-    # and contents: write on a v* tag push.
+    # GITHUB_TOKEN on pull_request, and the release jobs run on a v* tag push —
+    # release-image with packages: write, major-alias with GITHUB_TOKEN at
+    # contents: read plus the RELEASER_APP_PRIVATE_KEY secret it exchanges for
+    # a write-capable app installation token.
     trust_zone "Credentialed Actions runner" {
       # The engine is built here from source that crossed in from the
       # untrusted zone above.
@@ -212,13 +220,25 @@ threatmodel "threatcl-drift-action" {
       }
     }
 
-    # Where the runner's two credentials are spent.
+    # Where the runner's credentials are spent, and — for the release app —
+    # where one of them is obtained.
     trust_zone "External APIs" {
       external_element "GitHub API" {
         trust_zone = "External APIs"
       }
 
       external_element "Anthropic API" {
+        trust_zone = "External APIs"
+      }
+
+      # The org-owned GitHub App whose installation token moves the v0 alias.
+      # Modelled separately from "GitHub API" because it is a distinct
+      # identity with its own grant (contents read-write on this repository
+      # alone) and its own credential — RELEASER_APP_PRIVATE_KEY, held as a
+      # repository secret, plus the RELEASER_APP_ID variable. It is the only
+      # actor the refs/tags v0 ruleset lets bypass, which is why the runner
+      # identity's own token cannot make the push.
+      external_element "Release App" {
         trust_zone = "External APIs"
       }
     }
@@ -269,8 +289,32 @@ threatmodel "threatcl-drift-action" {
       to   = "GitHub API"
     }
 
-    # major-alias: git push origin -f refs/tags/v0 with a contents: write
-    # token. Distinct from the publish above because it rewrites a ref
+    # major-alias, before the checkout: actions/create-github-app-token@v2
+    # signs a JWT with secrets.RELEASER_APP_PRIVATE_KEY for the app named by
+    # vars.RELEASER_APP_ID and exchanges it for an installation token
+    # (.github/workflows/release.yml, the "Mint a release-app token" step).
+    # The private key never leaves the runner; what crosses back is a
+    # short-lived token, drawn as its own flow below.
+    flow "release-app token mint" {
+      from = "Release publisher"
+      to   = "Release App"
+    }
+
+    # The minted token entering the credentialed zone, where the checkout
+    # persists it as the push credential. This is the edge that upgrades the
+    # job from contents: read to a ref-writing identity, so the release app's
+    # grant — not the runner's permissions block — is what bounds the push
+    # below.
+    flow "installation token issue" {
+      from = "Release App"
+      to   = "Release publisher"
+    }
+
+    # major-alias: git push origin -f refs/tags/v0. Authenticated with the
+    # app installation token above rather than the runner's GITHUB_TOKEN,
+    # which is contents: read here — the refs/tags v0 ruleset admits only the
+    # release app, and GitHub refuses to put the Actions identity on a bypass
+    # list. Distinct from the publish above because it rewrites a ref
     # consumers already resolve, rather than adding a new immutable artifact.
     flow "major alias tag move" {
       from = "Release publisher"
