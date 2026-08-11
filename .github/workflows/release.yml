@@ -15,6 +15,10 @@ env:
 jobs:
   release-image:
     permissions:
+      # Job-level permissions replace the workflow-level block rather than
+      # extending it, so contents has to be repeated here — without it the
+      # token gets contents: none and the checkout below 403s.
+      contents: read
       packages: write
     runs-on: ubuntu-latest
     steps:
@@ -46,3 +50,25 @@ jobs:
             VERSION=${{ github.ref_name }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+
+  major-alias:
+    # Consumers write `uses: threatcl/drift-action@v0`, which resolves through
+    # this tag — so it has to follow every release, and it must never point at
+    # a release whose image failed to publish. Hence `needs`.
+    needs: release-image
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Move the major alias to this release
+        run: |
+          set -euo pipefail
+          major="${GITHUB_REF_NAME%%.*}"
+          if [ "$major" = "$GITHUB_REF_NAME" ]; then
+            echo "::error::$GITHUB_REF_NAME is not a vX.Y.Z tag; refusing to move an alias"
+            exit 1
+          fi
+          git tag -f "$major" "$GITHUB_SHA"
+          git push origin -f "refs/tags/$major"
