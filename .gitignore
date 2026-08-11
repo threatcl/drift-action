@@ -13,3 +13,6 @@ coverage.out
 .DS_Store
 .env
 .claude/settings.local.json
+
+# local dry-run harness — deliberately not part of the repo
+hack/

@@ -139,25 +139,18 @@ This is a local testing affordance. Do not wire either variable into a real
 workflow: a replayed review says nothing about the pull request in front of it.
 See [`testdata/recordings/`](testdata/recordings/).
 
-[`hack/dry-run.sh`](hack/dry-run.sh) wires all of this together against a real
-pull request — it resolves the base and head SHAs, fetches the head tree through
-the GitHub API (nothing is cloned into your working copy), builds, and runs:
-
-```bash
-hack/dry-run.sh                    # replay the committed recording, post nothing
-hack/dry-run.sh --live             # call the model (needs ANTHROPIC_API_KEY)
-hack/dry-run.sh --live --record    # re-record the fixture while reviewing
-hack/dry-run.sh --post             # actually write the comment and check run
-
-PR=owner/repo#7 hack/dry-run.sh    # target a different pull request
-```
-
 Two things differ when driving the binary by hand rather than from a workflow.
+
 Check runs can only be created by a GitHub App, so a personal access token gets
 `403 You must authenticate via a GitHub App` — the comment still posts, and the
 run logs the check run as a warning rather than failing, exactly as it does for
 a fork PR's read-only token. Under Actions, `GITHUB_TOKEN` is an app
 installation token and `checks: write` works.
+
+And `GITHUB_WORKSPACE` has to hold the repository at the pull request's head
+commit. The diff arrives from the compare API, but context stuffing reads whole
+files from that directory — point it at a stale tree and the review answers
+"was the code behind this control removed?" from the wrong revision.
 
 ### Outputs
 
