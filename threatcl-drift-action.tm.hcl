@@ -77,9 +77,22 @@ threatmodel "threatcl-drift-action" {
   }
 
   threat "Mutable major alias repointed at attacker-chosen code" {
-    description = "Consumers pin uses: threatcl/drift-action@v0, and the major-alias job in .github/workflows/release.yml moves that alias on every vX.Y.Z tag push with git tag -f and git push origin -f. The alias is force-moved rather than immutable, so v0 is a mutable pointer to whichever commit last claimed it — history is rewritten silently and there is no record on the tag of what it used to name. Anyone able to push a vX.Y.Z tag, or to alter .github/workflows/release.yml so the job computes a different target, repoints v0 for every downstream consumer at once; the job runs with contents: write, and its only guard is a tag-shape check that refuses a tag containing no dot. Consumers observe nothing: the same @v0 string resolves to different code on their next run, which then executes in their runner with their own secrets and their own PR-write token"
+    description = "Consumers pin uses: threatcl/drift-action@v0, and the major-alias job in .github/workflows/release.yml moves that alias on every vX.Y.Z tag push with git tag -f and git push origin -f. The alias is force-moved rather than immutable, so v0 is a mutable pointer to whichever commit last claimed it — history is rewritten silently and there is no record on the tag of what it used to name. Anyone able to push a vX.Y.Z tag, or to alter .github/workflows/release.yml so the job computes a different target, repoints v0 for every downstream consumer at once; the job runs with contents: write, guarded by a tag-shape check and an ancestry check that constrain what the alias can be moved onto but not who can trigger the move. Consumers observe nothing: the same @v0 string resolves to different code on their next run, which then executes in their runner with their own secrets and their own PR-write token"
     impacts     = ["Integrity"]
     stride      = ["Tampering", "Elevation Of Privilege"]
+
+    control "Alias moves only onto commits reachable from main" {
+      description    = "The major-alias job in .github/workflows/release.yml refuses the move unless the tagged commit is an ancestor of origin/main (git merge-base --is-ancestor, over a full-history checkout so main is visible — a shallow fetch makes the check fail closed rather than pass). A tag push can carry its own commit, so without this anyone able to push a vX.Y.Z tag could point v0 at code that never appeared in a pull request; with it, a repoint requires the code to have landed on main first. Guards the target of a move, not the trigger — the ruleset control covers who can push the tags at all"
+      implemented    = true
+      risk_reduction = 40
+    }
+
+    control "Tag rulesets restrict release-tag creation and alias moves" {
+      description          = "Two repository rulesets: refs/tags v*.*.* release tags are create-only — no update, no delete — with creation restricted to repository admins, and refs/tags v0 is creatable and movable only by the GitHub Actions app, so the alias follows a release workflow run rather than any writer's direct push. Guards the trigger of a move and complements the ancestry check, which guards the target"
+      implemented          = false
+      implementation_notes = "The two JSON payloads are drafted; apply each with gh api repos/threatcl/drift-action/rulesets -X POST --input <payload>, or recreate them in Settings > Rules > Rulesets, then flip this to implemented. Two limits to know. Bypass is granted to the GitHub Actions app as a whole, so any workflow in this repo with contents: write can still move v0 — the ancestry check backstops exactly that path. And ruleset enforcement on a private repository requires a paid org plan, so on the free tier this cannot enforce until the repo is public — which the missing threatcl/spec LICENSE currently blocks. Admins are deliberately absent from the v0 bypass list: an emergency manual move means editing the ruleset first, which is the audit trail working as intended"
+      risk_reduction       = 50
+    }
   }
 
   threat "Repo source and diff shared with the LLM provider" {
