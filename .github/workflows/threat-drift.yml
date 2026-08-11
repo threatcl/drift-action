@@ -1,0 +1,29 @@
+name: threat-drift
+
+on:
+  pull_request:
+
+# One review in flight per PR. A push supersedes the run for the previous
+# commit rather than racing it for the sticky comment.
+concurrency:
+  group: threat-drift-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      # Pre-release dogfooding: `uses: ./` builds and runs the PR's own
+      # engine, so this doubles as an end-to-end test — a broken engine
+      # reviews its own breakage. Switch to the pinned release
+      # (threatcl/drift-action@v0) once v0.1.0 exists, so the released
+      # engine reviews PRs instead.
+      - uses: ./
+        with:
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

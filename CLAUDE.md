@@ -153,10 +153,19 @@ already pushes to ghcr on `v*` tags. See the plan file.
 
 - `threatcl/spec` has no LICENSE file. It is a direct dependency, so resolve
   that before this repo is made public.
-- Config file name `.threatcl-ci.hcl`: coordinate with the claude-plugin's
-  `/threat-ci` scaffolder before first release.
-- No repo in the org has a root-level `.tm.hcl` yet, so dogfooding needs one
-  added (or `model_paths` pointed at an existing model).
+- Config file name `.threatcl-ci.hcl` is settled; the claude-plugin's
+  `/threat-ci` scaffolder still needs updating to emit it (and the workflow
+  with the `concurrency:` block and a pinned release). The threatcl editor
+  LSP also flags `.threatcl-ci.hcl` as an invalid threat model — it should
+  learn to skip the file, as engine discovery already does.
+- Dogfooding is wired in this repo: root `threatcl-drift-action.tm.hcl`
+  (guarded by `TestRepoThreatModel` — it must load, and every prose-referenced
+  path must exist), `.threatcl-ci.hcl` with `trigger_paths = ["prompts/"]`
+  (`.md` is filter noise, but prompt edits change the reviewer itself), and
+  `.github/workflows/threat-drift.yml` using `uses: ./` until v0.1.0 — switch
+  to the pinned release then. Needs the `ANTHROPIC_API_KEY` repo secret.
+  Spec's DFD slugifier splits every capital (`PR Author` → `p_r_author`), so
+  the DFD flows use quoted-name refs instead of dot notation.
 
 ## Siblings
 
