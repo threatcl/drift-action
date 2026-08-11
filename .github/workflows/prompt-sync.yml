@@ -15,7 +15,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Compare vendored prompt against upstream HEAD
         run: |
           curl -fsSL https://raw.githubusercontent.com/threatcl/claude-plugin/main/commands/threat-drift.md -o /tmp/upstream-threat-drift.md
