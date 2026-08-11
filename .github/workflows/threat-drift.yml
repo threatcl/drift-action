@@ -29,8 +29,11 @@ jobs:
       # one. Dependabot bumps the SHA; the trailing comment is how it tracks
       # the version.
       #
-      # v0.1.0's action.yml still builds from its Dockerfile, so this job
-      # takes a few minutes to start until the pin moves to v0.1.1 or later.
-      - uses: threatcl/drift-action@49e764e69bc276b4f936283524921469ccf8a159 # v0.1.0
+      # From v0.1.1 the pinned action.yml names the image by digest, so the
+      # runner pulls it instead of building the container — the v0.1.0 pin
+      # spent 81s per run compiling before the review could start. The pin
+      # necessarily trails by one release: the SHA of the release being cut
+      # does not exist while it is being cut.
+      - uses: threatcl/drift-action@26ad20c346058f85283822a4043f60e5ff59a6c2 # v0.1.1
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
