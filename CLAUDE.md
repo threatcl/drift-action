@@ -175,10 +175,12 @@ tagging, the ordering is load-bearing.
   (guarded by `TestRepoThreatModel` — it must load, and every prose-referenced
   path must exist), `.threatcl-ci.hcl` with `trigger_paths = ["prompts/"]`
   (`.md` is filter noise, but prompt edits change the reviewer itself), and
-  `.github/workflows/threat-drift.yml` using `uses: ./` until v0.1.0 — switch
-  to the pinned release then, and flip the "Pin the workflow to the released
-  action" control to `implemented = true` in the same commit or the action
-  will report a phantom control against its own model. Spec's DFD slugifier
+  `.github/workflows/threat-drift.yml` pinning `threatcl/drift-action` to a
+  released commit SHA — never `@v0`, which is force-moved every release and
+  would leave this privileged job's engine mutable; Dependabot bumps the SHA.
+  Any change to how that job resolves the action has to move the "Pin the
+  workflow to the released action" control with it, or the action reports a
+  phantom control against its own model. Spec's DFD slugifier
   splits every capital (`PR Author` → `p_r_author`), so the DFD flows use
   quoted-name refs instead of dot notation.
 - A second provider (OpenAI) is unblocked now that finding quality is

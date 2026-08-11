@@ -40,7 +40,17 @@ outputs:
     description: 'Path to the rendered markdown report (written under RUNNER_TEMP)'
 runs:
   using: 'docker'
-  image: 'Dockerfile'
+  # The published image, so a consumer pulls in seconds rather than building
+  # the container on every run.
+  #
+  # Pinned by digest rather than by tag: a ghcr tag is a mutable pointer that
+  # anyone with packages: write can repoint silently. This is the v0.1.0 image
+  # — legitimate here because this release changes no engine code, so the
+  # binary is identical; the threat model and config are read from the
+  # workspace at runtime. Steady-state releases cannot do this (the image does
+  # not exist yet when the commit is tagged) and pin the version tag instead.
+  # See docs/RELEASING.md.
+  image: 'docker://ghcr.io/threatcl/drift-action@sha256:0f1807a196188ba76f8cd835c3f9cced7d85b23fe7dc0d51d2edcae1589bbc8b'
   env:
     ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
     GITHUB_TOKEN: ${{ inputs.github-token }}
