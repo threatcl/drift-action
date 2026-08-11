@@ -47,7 +47,8 @@ X.Y.Z-1 — a silent lie about which code reviewed the pull request, which is a
 far worse trade than a few minutes of pull failures.
 
 The dogfooding workflow is unaffected either way: after the first release it
-uses `@v0`, not `./`, so it never reads the working tree's `action.yml`.
+pins a released commit rather than `./`, so it never reads the working tree's
+`action.yml`. It pins a SHA rather than `@v0` — see below.
 
 ## The first release: bootstrapping v0.1.0
 
@@ -78,23 +79,47 @@ Bootstrap across two tags instead.
      and config are read from the workspace at runtime. This is not the
      previous-version pin forbidden above: that rule guards against an older
      engine lying under a newer tag, and these two engines are identical
-   - changes `.github/workflows/threat-drift.yml` from `uses: ./` to
-     `uses: threatcl/drift-action@v0`
+   - changes `.github/workflows/threat-drift.yml` from `uses: ./` to the
+     **commit SHA** of the v0.1.0 release, with `# v0.1.0` trailing so
+     Dependabot's `github-actions` ecosystem tracks it — not `@v0`, see below
    - flips the **"Pin the workflow to the released action"** control in
      `threatcl-drift-action.tm.hcl` to `implemented = true` and rewrites its
      implementation notes
    - drops the pre-release banner from the README and changes the usage
      examples from `@main` to `@v0`
 
-   The dogfood job on this PR runs `@v0` — v0.1.0's engine, built from its
-   Dockerfile — so it is green whether or not the v0.1.1 image exists yet.
+   The dogfood job on this PR runs v0.1.0's engine, built from its Dockerfile,
+   so it is green whether or not the v0.1.1 image exists yet.
 5. Merge, tag `v0.1.1`, push. Steady state applies from here.
 
-Step 4's threat-model edit is not bookkeeping. That control is
-`implemented = false` today because `uses: ./` is a deliberate pre-release
-choice. Ship the pin without flipping the flag and the action should report a
-phantom control against its own threat model on the next pull request. That is
-a fine way to find out, but a worse way than remembering.
+## Why this repo's own job does not use `@v0`
+
+Consumers are pointed at `@v0` because following patches without editing a
+workflow is what most repositories want. This repository's drift job is the
+exception: it holds the Anthropic key and a token that can write to pull
+requests, and `major-alias` force-moves `v0` on every release. Pinning it to
+the alias would trade a PR-controlled engine for a tag-push-controlled one
+rather than for a fixed one — see the *Mutable major alias repointed at
+attacker-chosen code* threat in `threatcl-drift-action.tm.hcl`.
+
+So it pins a commit SHA, and Dependabot bumps it. Two consequences follow,
+both accepted deliberately:
+
+- The dogfood job no longer runs the pull request's own engine, so it has
+  stopped being an end-to-end test of the code under review. That coverage
+  now lives in `ci.yml` — the unit suite, the corpus replay, and the docker
+  build.
+- The pin lags one release, because the SHA of the release being cut does not
+  exist while it is being cut. A pin is only slow to start if *that* release
+  still built from its Dockerfile; from v0.1.1 on it pulls the image.
+
+Step 4's threat-model edit is not bookkeeping. That control was
+`implemented = false` for as long as `uses: ./` was a deliberate pre-release
+choice, and the flag has to move in the same commit as the pin. Ship one
+without the other and the action should report a phantom control against its
+own threat model on the next pull request — a fine way to find out, but a
+worse way than remembering. The same applies in reverse to anything that later
+loosens the pin.
 
 ## Before tagging
 

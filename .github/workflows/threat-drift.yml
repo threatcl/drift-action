@@ -18,12 +18,19 @@ jobs:
   drift:
     runs-on: ubuntu-latest
     steps:
+      # The checkout stays: the diff comes from the compare API, but context
+      # stuffing reads whole files out of the workspace.
       - uses: actions/checkout@v6
-      # Pre-release dogfooding: `uses: ./` builds and runs the PR's own
-      # engine, so this doubles as an end-to-end test — a broken engine
-      # reviews its own breakage. Switch to the pinned release
-      # (threatcl/drift-action@v0) once v0.1.0 exists, so the released
-      # engine reviews PRs instead.
-      - uses: ./
+
+      # Pinned to an immutable commit rather than @v0. This job holds the
+      # Anthropic key and a write-scoped token, and the major alias is
+      # force-moved on every release, so pinning to it would swap a
+      # PR-controlled engine for a tag-push-controlled one instead of a fixed
+      # one. Dependabot bumps the SHA; the trailing comment is how it tracks
+      # the version.
+      #
+      # v0.1.0's action.yml still builds from its Dockerfile, so this job
+      # takes a few minutes to start until the pin moves to v0.1.1 or later.
+      - uses: threatcl/drift-action@49e764e69bc276b4f936283524921469ccf8a159 # v0.1.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

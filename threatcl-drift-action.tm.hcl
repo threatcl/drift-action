@@ -57,7 +57,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   threat "PR-authored engine code runs in the privileged dogfooding job" {
-    description            = "The dogfooding workflow .github/workflows/threat-drift.yml triggers on pull_request and runs uses: ./, so the action is built from the PR head — a pull request supplies the engine that reviews it, not just the content being reviewed. That job is granted pull-requests: write and checks: write and is handed secrets.ANTHROPIC_API_KEY, so PR-authored changes to the Dockerfile, the entrypoint or any package under internal/ execute in the runner with the Anthropic key in their environment and a token that can write comments and check runs. The existing 'Prompt injection via PR-controlled diff or context files' threat covers only what a PR puts in the prompt; this covers what a PR puts in the program, which no schema or evidence sanitizer constrains"
+    description            = "A pull request supplies the engine that reviews it, not merely the content being reviewed. Whenever .github/workflows/threat-drift.yml resolves the action from the pull request's own tree — uses: ./, or any ref an author can move — PR-authored changes to the Dockerfile, the entrypoint or any package under internal/ execute in a runner granted pull-requests: write and checks: write and handed secrets.ANTHROPIC_API_KEY, with that key in their environment and a token that can write comments and check runs. The 'Prompt injection via PR-controlled diff or context files' threat covers only what a pull request puts in the prompt; this covers what it puts in the program, which no schema or evidence sanitizer constrains. The workflow ran uses: ./ through v0.1.0 and now pins a released commit SHA, so the path is closed unless that pin is loosened"
     impacts                = ["Confidentiality", "Integrity"]
     stride                 = ["Elevation Of Privilege", "Tampering"]
     information_asset_refs = ["action credentials"]
@@ -69,9 +69,9 @@ threatmodel "threatcl-drift-action" {
     }
 
     control "Pin the workflow to the released action" {
-      description          = "Replace uses: ./ in .github/workflows/threat-drift.yml with an immutable pin — the release commit SHA, or failing that a vX.Y.Z tag — so a fixed, published engine reviews PRs instead of each PR's own build. Not @v0: the major alias is force-moved on every release, so pinning to it would leave the reviewing engine mutable"
-      implemented          = false
-      implementation_notes = "The release plumbing this depends on is now in place: the major-alias job in .github/workflows/release.yml publishes the v0 alias after release-image succeeds, so the tag consumers pin is produced by the release workflow rather than by hand. The only remaining blocker is the first tagged release — no vX.Y.Z tag exists yet. The switch is recorded in a comment in .github/workflows/threat-drift.yml; until it happens uses: ./ is deliberate, since it makes the job an end-to-end test of the PR's engine, and this control stays unimplemented. Whichever pin lands, it should not be @v0 — that alias is force-moved with git tag -f and git push origin -f on every release, so pinning to it trades a PR-controlled build for a tag-push-controlled one rather than for a fixed target; see the 'Mutable major alias repointed at attacker-chosen code' threat. Consumers are documented on @v0 for the usual reasons, but this repo's own privileged dogfooding job is the case where the mutability matters most, so it takes the SHA pin"
+      description          = ".github/workflows/threat-drift.yml resolves threatcl/drift-action at an immutable released commit SHA rather than building the pull request's own tree, so a fixed, published engine reviews every PR. Not @v0: the major alias is force-moved on every release, so pinning to it would leave the reviewing engine mutable"
+      implemented          = true
+      implementation_notes = "Done: .github/workflows/threat-drift.yml pins threatcl/drift-action to the commit SHA of the v0.1.0 release, with the version in a trailing comment so Dependabot's github-actions ecosystem bumps it. Not @v0, deliberately — that alias is force-moved with git tag -f and git push origin -f on every release, so pinning to it would trade a PR-controlled engine for a tag-push-controlled one rather than for a fixed target; see the 'Mutable major alias repointed at attacker-chosen code' threat. Consumers are documented on @v0 for the usual reasons, but this privileged job holds the Anthropic key and a write-scoped token, so it takes the SHA. Two consequences of the pin are worth knowing: the dogfooding job no longer runs the pull request's own engine, so it has stopped being an end-to-end test of the code under review — that coverage now rests on the unit suite, the corpus replay and the docker build in .github/workflows/ci.yml — and because v0.1.0's own action.yml still builds from its Dockerfile, the job stays slow to start until the pin advances to v0.1.1 or later"
       risk_reduction       = 60
     }
   }
@@ -186,9 +186,9 @@ threatmodel "threatcl-drift-action" {
   }
 
   data_flow_diagram_v2 "review pipeline" {
-    # Everything the PR author controls. The workflow checks out the PR ref and
-    # runs uses: ./, so this zone supplies both the content under review and the
-    # engine binary that reviews it.
+    # Everything the PR author controls. The workflow checks out the PR ref, so
+    # this zone supplies the content under review. It no longer supplies the
+    # engine that reviews it: that is pinned to a released commit.
     # Each element repeats its enclosing zone as an attribute. Nesting alone
     # does not populate it, and the assertion renderer reads the attribute, so
     # without this the zones list but nothing is attributed to them. Spec
@@ -207,7 +207,7 @@ threatmodel "threatcl-drift-action" {
     # contents: read plus the RELEASER_APP_PRIVATE_KEY secret it exchanges for
     # a write-capable app installation token.
     trust_zone "Credentialed Actions runner" {
-      # The engine is built here from source that crossed in from the
+      # Runs here from pinned, released content — no longer built from the
       # untrusted zone above.
       process "Drift Review Engine" {
         trust_zone = "Credentialed Actions runner"
@@ -259,11 +259,14 @@ threatmodel "threatcl-drift-action" {
     }
 
     # Distinct from the flow above: not the diff being reviewed, but the
-    # program doing the reviewing. actions/checkout@v6 plus uses: ./ in
-    # .github/workflows/threat-drift.yml builds the container from the PR head,
-    # so this edge carries PR-author-controlled code into the credentialed zone.
-    flow "engine source and container build" {
-      from = "PR Author"
+    # program doing the reviewing. This edge used to run from PR Author —
+    # uses: ./ built the container from the PR head — and the SHA pin in
+    # .github/workflows/threat-drift.yml moved its source to fixed, released
+    # content fetched from GitHub. Today that is the pinned repository tree,
+    # which v0.1.0's action.yml still builds from its Dockerfile; once the pin
+    # advances past v0.1.1 it is the published image pulled from ghcr.
+    flow "pinned engine fetch" {
+      from = "GitHub API"
       to   = "Drift Review Engine"
     }
 

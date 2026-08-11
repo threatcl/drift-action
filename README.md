@@ -11,9 +11,11 @@ findings — the CI counterpart of the
 [threatcl claude-plugin](https://github.com/threatcl/claude-plugin)'s
 `/threat-drift` command.
 
-> **Status: pre-release.** The engine runs end to end — it parses the model,
-> selects the diff, and reviews it — but the finding quality has not been
-> validated on a corpus yet, and the action is not tagged for release. See
+> **Status: v0.** Finding quality is validated two ways — a corpus of paired
+> threat models and diffs under `testdata/corpus/`, one case per drift
+> category plus a clean case, and continuous dogfooding on this repository's
+> own pull requests. Inputs, outputs and the config surface may still change
+> before v1, so pin a version. See
 > [docs/phase1-plan.md](docs/phase1-plan.md).
 
 ## What it detects
@@ -54,7 +56,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: threatcl/drift-action@main
+      - uses: threatcl/drift-action@v0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -64,6 +66,18 @@ takes minutes of inference, and without it two rapid pushes race to update the
 same sticky comment — last writer wins, possibly with findings from the older
 commit. Cancelling the in-flight run means the comment always reflects the
 newest push.
+
+`@v0` follows the latest v0.x release, which is what most repositories want.
+It is a moving alias, though: it is force-moved onto each new release, so the
+engine reviewing your pull requests can change without you editing anything.
+Where that matters — the job holds an LLM API key and a token that can write
+to pull requests — pin the commit SHA instead and let Dependabot bump it:
+
+```yaml
+- uses: threatcl/drift-action@<commit-sha> # v0.1.1
+```
+
+This repository's own drift workflow pins the SHA, for exactly that reason.
 
 ### Inputs
 
@@ -83,7 +97,7 @@ of writing to the pull request. Use it to trial the action on real PRs before
 letting it comment:
 
 ```yaml
-- uses: threatcl/drift-action@main
+- uses: threatcl/drift-action@v0
   with:
     dry-run: true
 ```
