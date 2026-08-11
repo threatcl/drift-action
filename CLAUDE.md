@@ -155,7 +155,7 @@ a run that actually assessed and found consistency. Milestone 3 is therefore
 done except for the release itself.
 
 Release mechanics are staged but **not yet cut** — no tag exists. `ci.yml`
-runs the corpus replay, `release.yml` publishes the ghcr image on `v*` and
+runs the corpus replay, `release.yml` publishes the ghcr image on `v*.*.*` and
 moves the `v0` alias consumers pin, and `docs/RELEASING.md` holds the
 procedure. The first release is a deliberate two-tag bootstrap (v0.1.0
 publishes an image while `action.yml` still says `Dockerfile`; v0.1.1 flips

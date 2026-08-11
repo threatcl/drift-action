@@ -3,7 +3,13 @@ name: release
 on:
   push:
     tags:
-      - 'v*'
+      # Full version tags only. 'v*' would also match the v0 alias that
+      # major-alias force-pushes at the end of this very workflow, so every
+      # release re-triggered itself: a redundant rebuild, a mutable :v0 image
+      # tag on ghcr, and a failed run each time, since the second pass tripped
+      # the tag-shape guard below. This is also the shape the 'release tags are
+      # immutable' ruleset protects.
+      - 'v*.*.*'
 
 permissions:
   contents: read
@@ -83,6 +89,10 @@ jobs:
       - name: Move the major alias to this release
         run: |
           set -euo pipefail
+          # Backstop, not the primary defence: the trigger above no longer
+          # matches an alias tag. This still refuses to run if that filter is
+          # ever loosened, which is what stops a release from re-triggering
+          # itself in a loop.
           major="${GITHUB_REF_NAME%%.*}"
           if [ "$major" = "$GITHUB_REF_NAME" ]; then
             echo "::error::$GITHUB_REF_NAME is not a vX.Y.Z tag; refusing to move an alias"
