@@ -11,6 +11,17 @@ released commit, GitHub reads *that commit's* `action.yml`, and `action.yml`
 names an exact image — `docker://ghcr.io/threatcl/drift-action:vX.Y.Z`. The
 ref moves; the engine behind it stays pinned.
 
+Pinned by tag, though, not by content: a ghcr tag is itself a mutable
+pointer, and anyone with `packages: write` can repoint it silently — the
+same class of problem as the force-moved `v0` alias, one link further down
+the chain. The immutable form is a digest
+(`docker://ghcr.io/threatcl/drift-action@sha256:…`), but a digest can only
+name an image that already exists, and the steady-state order tags the
+commit before its image is built. Digest-pinning every release would need a
+publish-before-tag flow, which this is not. Steady-state releases accept
+the tag-pin residual; the one place a digest pin is free is the v0.1.1
+bootstrap flip below, and it takes it.
+
 `image: 'Dockerfile'` works too, and is what the repo ships pre-release, but
 it makes every consumer build the container on every run: roughly seven
 minutes before the review even starts, against seconds to pull. That gap is
@@ -58,7 +69,15 @@ Bootstrap across two tags instead.
 **v0.1.1 — switch to the published image**
 
 4. Open one PR that does all of:
-   - sets `action.yml` to `docker://ghcr.io/threatcl/drift-action:v0.1.1`
+   - sets `action.yml` to `docker://ghcr.io/threatcl/drift-action@sha256:…`,
+     the **digest of the v0.1.0 image** — the ghcr package page shows it, as
+     does `gh api /orgs/threatcl/packages/container/drift-action/versions`.
+     A digest, unlike a tag, cannot be repointed. It is available because
+     v0.1.0 is already published, and it is honest because this PR changes
+     no engine code — the image is just the static binary; the threat model
+     and config are read from the workspace at runtime. This is not the
+     previous-version pin forbidden above: that rule guards against an older
+     engine lying under a newer tag, and these two engines are identical
    - changes `.github/workflows/threat-drift.yml` from `uses: ./` to
      `uses: threatcl/drift-action@v0`
    - flips the **"Pin the workflow to the released action"** control in
@@ -81,6 +100,7 @@ a fine way to find out, but a worse way than remembering.
 
 - [ ] `go build ./... && go vet ./... && go test ./...`
 - [ ] `THREATCL_DRIFT_CORPUS=replay go test ./internal/corpus`
-- [ ] `action.yml`'s image tag matches the tag about to be pushed
+- [ ] `action.yml`'s image reference matches the tag about to be pushed
+      (steady state — the v0.1.1 flip digest-pins the v0.1.0 image instead)
 - [ ] the README's inputs and outputs tables match `action.yml`
 - [ ] `prompts/upstream/SOURCE` is current if the prompt was re-vendored
