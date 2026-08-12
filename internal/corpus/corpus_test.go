@@ -15,8 +15,10 @@
 //	THREATCL_DRIFT_CORPUS=record ANTHROPIC_API_KEY=… go test ./internal/corpus -v -timeout 60m
 //	THREATCL_DRIFT_CORPUS=replay go test ./internal/corpus -v
 //
-// record writes each case's review to <case>/recording.json; replay asserts
-// against those recordings without paying for inference.
+// record writes each case's review to <case>/recording.<provider>.json;
+// replay asserts against those recordings without paying for inference. In
+// replay mode a case with no recording fails — this suite is CI's quality
+// gate, so it must never pass by having measured nothing.
 package corpus
 
 import (
@@ -33,12 +35,11 @@ import (
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/deps"
 	"github.com/threatcl/drift-action/internal/diff"
+	"github.com/threatcl/drift-action/internal/engine"
 	"github.com/threatcl/drift-action/internal/findings"
 	"github.com/threatcl/drift-action/internal/llm"
-	"github.com/threatcl/drift-action/internal/llm/anthropic"
 	"github.com/threatcl/drift-action/internal/llm/fixture"
 	"github.com/threatcl/drift-action/internal/model"
-	"github.com/threatcl/drift-action/prompts"
 )
 
 // modeEnv selects how TestCorpus reviews: live, record, or replay. Unset
@@ -160,9 +161,10 @@ func readChanges(t *testing.T, dir string) []diff.Change {
 	return changes
 }
 
-// assemble builds the review request for one case the same way the action
-// does: load the model, filter the diff, extract manifest facts, render, and
-// select context files from the workspace.
+// assemble builds the review request for one case through the same code the
+// action runs: engine.FilterChanges and engine.AssembleRequest. Reproducing
+// either here is how the corpus previously came to measure a request the
+// action does not send.
 func assemble(t *testing.T, dir string) llm.ReviewRequest {
 	t.Helper()
 	cfg := config.Default()
@@ -178,33 +180,27 @@ func assemble(t *testing.T, dir string) llm.ReviewRequest {
 	}
 
 	changes := readChanges(t, dir)
-	filtered := diff.Filter(changes, diff.Options{
-		ExtraPatterns: assertions.ReferencedPaths(),
-		NarrowAbove:   cfg.NarrowAbove,
-	})
+	filtered := engine.FilterChanges(cfg, assertions, changes)
 	if len(filtered.Kept) == 0 {
 		t.Fatalf("the filter kept none of the case's %d change(s); the review would assess nothing", len(changes))
 	}
 
-	diffText, tooLarge := diff.Render(filtered.Kept, cfg.MaxPatchBytes)
-	if len(tooLarge) > 0 {
-		t.Fatalf("case exceeds the patch budget: %s", strings.Join(tooLarge, ", "))
+	assembly := engine.AssembleRequest(cfg, engine.RequestInput{
+		Workspace:     workspace,
+		Assertions:    assertions,
+		Kept:          filtered.Kept,
+		ManifestFacts: deps.Facts(filtered.Kept),
+	})
+	// The action turns both of these into comment notes and reviews what is
+	// left. A corpus case is a fixed input that is supposed to fit, so either
+	// one means the case itself needs fixing.
+	if len(assembly.TooLarge) > 0 {
+		t.Fatalf("case exceeds the patch budget: %s", strings.Join(assembly.TooLarge, ", "))
 	}
-
-	selection := llm.SelectContext(workspace, assertions.ReferencedPaths(),
-		diff.Paths(filtered.Kept), cfg.MaxContextBytes)
-	if len(selection.Skipped) > 0 {
-		t.Fatalf("context files could not be read: %s", strings.Join(selection.Skipped, ", "))
+	if len(assembly.Skipped) > 0 {
+		t.Fatalf("context files could not be read: %s", strings.Join(assembly.Skipped, ", "))
 	}
-
-	return llm.ReviewRequest{
-		Prompt:          prompts.DriftCI,
-		ModelAssertions: assertions.Render(),
-		ManifestFacts:   deps.Render(deps.Facts(filtered.Kept)),
-		ContextFiles:    selection.Files,
-		Diff:            diffText,
-		Schema:          findings.SchemaJSON,
-	}
+	return assembly.Request
 }
 
 func readExpectation(t *testing.T, dir string) expectation {
@@ -285,7 +281,7 @@ func TestCorpus(t *testing.T) {
 
 			provider, err := newProvider(cfg, mode, dir, name)
 			if err != nil {
-				t.Skipf("%v", err)
+				t.Fatalf("%v", err)
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -315,24 +311,35 @@ func TestCorpus(t *testing.T) {
 	}
 }
 
-// newProvider builds the provider for one case in the given mode. In replay
-// mode a case with no recording is skipped, not failed — recordings
-// accumulate one paid run at a time.
+// recordingPath names one case's recording for one provider. Recordings are
+// per provider because each provider has to earn its place on the same seven
+// cases under its own recordings, and adding one must leave the Anthropic
+// baseline untouched.
+func recordingPath(dir, provider string) string {
+	return filepath.Join(dir, "recording."+provider+".json")
+}
+
+// newProvider builds the provider for one case in the given mode. Record and
+// replay wrap the live provider here rather than in engine.NewProvider: which
+// case is being recorded is the corpus's business.
+//
+// A missing recording in replay mode is an error, never a skip. ci.yml runs
+// replay as the finding-quality gate, and a skipped case makes a green run
+// that measured nothing — deleting every recording would have passed CI.
 func newProvider(cfg config.Config, mode, dir, name string) (llm.Provider, error) {
-	recording := filepath.Join(dir, "recording.json")
+	recording := recordingPath(dir, cfg.Provider)
 	if mode == "replay" {
 		if _, err := os.Stat(recording); err != nil {
-			return nil, fmt.Errorf("no recording for %s; run once with %s=record to create it", name, modeEnv)
+			return nil, fmt.Errorf("no %s recording for %s; run once with %s=record to create it",
+				cfg.Provider, name, modeEnv)
 		}
 		return fixture.NewPlayer(recording), nil
 	}
 
-	live := anthropic.New(anthropic.Options{
-		Model:     cfg.Model,
-		APIKey:    os.Getenv(cfg.APIKeyEnv),
-		Effort:    cfg.Effort,
-		MaxTokens: cfg.MaxTokens,
-	})
+	live, err := engine.NewProvider(cfg, os.Getenv(cfg.APIKeyEnv))
+	if err != nil {
+		return nil, err
+	}
 	if mode == "record" {
 		return fixture.NewRecorder(live, recording, "corpus/"+name), nil
 	}

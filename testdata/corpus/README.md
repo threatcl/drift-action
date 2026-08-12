@@ -17,7 +17,7 @@ gated on an env var so `go test ./...` never costs money:
 # Pay for a full run, ~7 reviews at the default model and effort:
 THREATCL_DRIFT_CORPUS=live ANTHROPIC_API_KEY=… go test ./internal/corpus -v -timeout 60m
 
-# Pay once, and keep each case's review in <case>/recording.json:
+# Pay once, and keep each case's review in <case>/recording.<provider>.json:
 THREATCL_DRIFT_CORPUS=record ANTHROPIC_API_KEY=… go test ./internal/corpus -v -timeout 60m
 
 # Re-assert against the recordings, free and offline:
@@ -28,6 +28,13 @@ A replayed case asserts what the engine produced when it was recorded — it
 exercises the harness, the schema, and the evidence rule for free, but says
 nothing about the current prompt. When a recording's fingerprint no longer
 matches the assembled request, the case logs it; re-record to re-measure.
+
+A case with no recording for the configured provider **fails**. This suite is
+CI's only finding-quality gate, so a missing recording has to be a red build
+rather than a case that quietly drops out of it — adding a case means
+recording it. Recordings are per provider (`recording.anthropic.json`), since
+each provider earns its place on these same seven cases under its own
+recordings and adding one must leave the others' baselines untouched.
 
 ## Case layout
 
@@ -43,8 +50,9 @@ matches the assembled request, the case logs it; re-record to re-measure.
                        a single space, never empty — the manifest parser
                        skips empty lines and line numbers desync.
   expected.json        what a good review must produce
-  recording.json       written by record mode; not committed until it has been
-                       eyeballed
+  recording.<provider>.json
+                       written by record mode, one per provider; not committed
+                       until it has been eyeballed
 ```
 
 `expected.json`:

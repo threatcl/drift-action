@@ -192,11 +192,17 @@ way to be wrong.
   quoted-name refs instead of dot notation.
 - A second provider (OpenAI) is unblocked now that finding quality is
   validated, and is the v0.2.0 candidate. It earns its place by passing the
-  same seven corpus cases under its own recordings — the harness currently
-  hardcodes the Anthropic constructor, so it needs parameterising by provider
-  first. Structured-outputs shape, refusal signalling and the absence of a
+  same seven corpus cases under its own recordings, which are per provider
+  (`recording.anthropic.json`) so adding one leaves the other's baseline
+  untouched. The harness no longer hardcodes a constructor: `internal/engine`
+  owns both `NewProvider` and `AssembleRequest`, so `main` and the corpus
+  build the same request through the same code — reproducing either in the
+  corpus is how it came to measure a request the action does not send.
+  Structured-outputs shape, refusal signalling and the absence of a
   server-side-fallback equivalent all differ; `ReviewResult.Fallback` stays
-  Anthropic-only.
+  Anthropic-only. The shared `findings-v0` schema is already strict-mode
+  clean (`additionalProperties: false` and full `required` at every level);
+  the one `const` needs rewriting as a single-value `enum`.
 
 ## Siblings
 

@@ -13,14 +13,13 @@ import (
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/deps"
 	"github.com/threatcl/drift-action/internal/diff"
+	"github.com/threatcl/drift-action/internal/engine"
 	"github.com/threatcl/drift-action/internal/findings"
 	"github.com/threatcl/drift-action/internal/gh"
 	"github.com/threatcl/drift-action/internal/llm"
-	"github.com/threatcl/drift-action/internal/llm/anthropic"
 	"github.com/threatcl/drift-action/internal/llm/fixture"
 	"github.com/threatcl/drift-action/internal/model"
 	"github.com/threatcl/drift-action/internal/render"
-	"github.com/threatcl/drift-action/prompts"
 )
 
 var version = "dev"
@@ -118,10 +117,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	filtered := diff.Filter(comparison.Changes, diff.Options{
-		ExtraPatterns: append(cfg.TriggerPaths, assertions.ReferencedPaths()...),
-		NarrowAbove:   cfg.NarrowAbove,
-	})
+	filtered := engine.FilterChanges(cfg, assertions, comparison.Changes)
 	log.Printf("diff: %d changed files, %d to review (%d noise, %d narrowed out)",
 		len(comparison.Changes), len(filtered.Kept), filtered.Noise, filtered.NarrowedOut)
 
@@ -299,7 +295,7 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 				cfg.APIKeyEnv)), info
 		}
 
-		live, err := newProvider(cfg, apiKey)
+		live, err := engine.NewProvider(cfg, apiKey)
 		if err != nil {
 			log.Printf("error: %v", err)
 			info.AnalysisMode = fmt.Sprintf("none — %v", err)
@@ -313,34 +309,28 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 		}
 	}
 
-	diffText, tooLarge := diff.Render(in.filtered.Kept, cfg.MaxPatchBytes)
-	if len(tooLarge) > 0 {
+	assembly := engine.AssembleRequest(cfg, engine.RequestInput{
+		Workspace:     in.workspace,
+		Assertions:    in.assertions,
+		Kept:          in.filtered.Kept,
+		ManifestFacts: in.manifestFacts,
+	})
+	if len(assembly.TooLarge) > 0 {
 		log.Printf("%d file(s) over the %d-byte patch budget were not sent: %s",
-			len(tooLarge), cfg.MaxPatchBytes, strings.Join(tooLarge, ", "))
+			len(assembly.TooLarge), cfg.MaxPatchBytes, strings.Join(assembly.TooLarge, ", "))
 		info.Notes = append(info.Notes, fmt.Sprintf(
 			"Patch budget: %d file(s) were too large to send and were not reviewed — %s",
-			len(tooLarge), summarise(tooLarge)))
+			len(assembly.TooLarge), summarise(assembly.TooLarge)))
 	}
-
-	selection := llm.SelectContext(in.workspace, in.assertions.ReferencedPaths(),
-		diff.Paths(in.filtered.Kept), cfg.MaxContextBytes)
 	log.Printf("context files: %d sent (%d bytes), %d skipped",
-		len(selection.Files), selection.Bytes, len(selection.Skipped))
-	if len(selection.Skipped) > 0 {
+		len(assembly.Request.ContextFiles), assembly.ContextBytes, len(assembly.Skipped))
+	if len(assembly.Skipped) > 0 {
 		info.Notes = append(info.Notes, fmt.Sprintf(
 			"Context files: %d file(s) the threat model references could not be sent whole, over budget or unreadable — %s",
-			len(selection.Skipped), summarise(selection.Skipped)))
+			len(assembly.Skipped), summarise(assembly.Skipped)))
 	}
 
-	request := llm.ReviewRequest{
-		Prompt:          prompts.DriftCI,
-		ModelAssertions: in.assertions.Render(),
-		ManifestFacts:   deps.Render(in.manifestFacts),
-		Categories:      cfg.Categories,
-		ContextFiles:    selection.Files,
-		Diff:            diffText,
-		Schema:          findings.SchemaJSON,
-	}
+	request := assembly.Request
 
 	reviewCtx, cancel := context.WithTimeout(ctx, inferenceTimeout)
 	defer cancel()
@@ -401,20 +391,6 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 			cfg.Model, result.Model))
 	}
 	return report, info
-}
-
-func newProvider(cfg config.Config, apiKey string) (llm.Provider, error) {
-	switch cfg.Provider {
-	case "anthropic", "":
-		return anthropic.New(anthropic.Options{
-			Model:     cfg.Model,
-			APIKey:    apiKey,
-			Effort:    cfg.Effort,
-			MaxTokens: cfg.MaxTokens,
-		}), nil
-	default:
-		return nil, fmt.Errorf("unknown llm provider %q; v0 supports anthropic only", cfg.Provider)
-	}
 }
 
 // unassessed builds the report for a run that produced no judgement. NoDrift
