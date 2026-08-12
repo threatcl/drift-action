@@ -53,7 +53,7 @@ runs:
   # only conflicts with the commit the workflow pushes. It still reads as the
   # v0.1.0 digest until the next release, because the v0.1.1 bootstrap had no
   # image of its own to name — see docs/RELEASING.md.
-  image: 'docker://ghcr.io/threatcl/drift-action@sha256:0f1807a196188ba76f8cd835c3f9cced7d85b23fe7dc0d51d2edcae1589bbc8b'
+  image: 'docker://ghcr.io/threatcl/drift-action@sha256:38f5fcc530eb1eb73b609ef7a69cc8ef7ddd096433e1af1fe6290207abc92251'
   env:
     ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
     GITHUB_TOKEN: ${{ inputs.github-token }}
