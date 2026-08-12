@@ -27,7 +27,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   information_asset "action credentials" {
-    description                = "The Anthropic API key and GitHub token the action holds at runtime; the token carries PR write permission. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, the RELEASER_APP_PRIVATE_KEY GitHub App private key secret and the RELEASER_APP_ID variable identifying the app, and the short-lived installation token minted from them by actions/create-github-app-token@v2 in the tag-release job — that job's own GITHUB_TOKEN is contents: read, and it is the installation token, persisted as the checkout push credential, that pushes the digest commit to main and can create and force-move tags in this repository, including the floating major alias consumers resolve. Any workflow run on a non-fork ref that can read RELEASER_APP_PRIVATE_KEY can mint that token"
+    description                = "The Anthropic API key, the OpenAI API key and the GitHub token the action holds at runtime; the token carries PR write permission. Both provider keys are forwarded into the container unconditionally by action.yml — deciding which to forward would need the config file read before the container starts — and the engine reads only the one its configured api_key_env names, so an unset input arrives as an empty string and counts as no key. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, the RELEASER_APP_PRIVATE_KEY GitHub App private key secret and the RELEASER_APP_ID variable identifying the app, and the short-lived installation token minted from them by actions/create-github-app-token@v2 in the tag-release job — that job's own GITHUB_TOKEN is contents: read, and it is the installation token, persisted as the checkout push credential, that pushes the digest commit to main and can create and force-move tags in this repository, including the floating major alias consumers resolve. Any workflow run on a non-fork ref that can read RELEASER_APP_PRIVATE_KEY can mint that token"
     information_classification = "Restricted"
   }
 
@@ -133,7 +133,7 @@ threatmodel "threatcl-drift-action" {
 
   threat "Repo source and diff shared with the LLM provider" {
     ref         = "TCL-T-LLM-DATASHARE"
-    description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the Anthropic API as a condition of every review — the files chosen are exactly the ones that back the model's controls and threats"
+    description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the configured LLM provider as a condition of every review — the Anthropic API by default, or the OpenAI API when llm.provider selects it, each recorded as its own third_party_dependency. The files chosen are exactly the ones that back the model's controls and threats, so the disclosure is targeted rather than incidental. Which third party receives it is a repository's own configuration choice, and nothing in the engine constrains that choice beyond the provider having to be one it implements"
     impacts     = ["Confidentiality"]
     stride      = ["Info Disclosure"]
   }
@@ -262,8 +262,10 @@ threatmodel "threatcl-drift-action" {
     }
 
     # Jobs in this repo's workflows that hold a credential. Two of them, on
-    # different triggers with different grants: the review job holds
-    # secrets.ANTHROPIC_API_KEY and a pull-requests/checks write-scoped
+    # different triggers with different grants: the review job holds whichever
+    # provider key is wired up — secrets.ANTHROPIC_API_KEY here, though
+    # action.yml forwards an OpenAI key just as readily — and a
+    # pull-requests/checks write-scoped
     # GITHUB_TOKEN on pull_request, and the release jobs run on a
     # workflow_dispatch — publish-image with packages: write, tag-release with
     # GITHUB_TOKEN at contents: read plus the RELEASER_APP_PRIVATE_KEY secret
@@ -291,6 +293,16 @@ threatmodel "threatcl-drift-action" {
       }
 
       external_element "Anthropic API" {
+        trust_zone = "External APIs"
+      }
+
+      # The alternative inference recipient, reached when llm.provider selects
+      # it. Its own element rather than folded into the one above, because the
+      # disclosure boundary is per-recipient: a repository choosing openai is
+      # choosing which third party sees its source, and a diagram that showed
+      # one box for "the LLM" would hide that choice. Exactly one of the two
+      # review-request flows is exercised per run.
+      external_element "OpenAI API" {
         trust_zone = "External APIs"
       }
 
@@ -368,6 +380,14 @@ threatmodel "threatcl-drift-action" {
     flow "review request with repo source" {
       from = "Drift Review Engine"
       to   = "Anthropic API"
+    }
+
+    # The same payload — prompt, model assertions, context files, diff — to
+    # the other provider. Which edge a given run takes is decided by
+    # llm.provider in .threatcl-ci.hcl, and never both in one review.
+    flow "review request to openai" {
+      from = "Drift Review Engine"
+      to   = "OpenAI API"
     }
 
     flow "sticky comment and check run" {
