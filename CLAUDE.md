@@ -215,11 +215,35 @@ way to be wrong.
   it without `llm.model` is a config-time error rather than a run that dies
   after fetching the diff.
 
-  Until the provider itself lands, `provider = "openai"` plus an explicit
-  model passes config validation and then fails in `engine.NewProvider` —
-  after the diff is fetched, which is the one thing config-time validation
-  exists to avoid. That window closes when `internal/llm/openai` exists;
-  do not ship a release inside it.
+  `internal/llm/openai` is implemented and wired into `engine.NewProvider`,
+  against the Responses API (`github.com/openai/openai-go/v3`), streaming for
+  the same reason Anthropic does — the token cap covers reasoning, so a
+  request generous enough to finish runs long enough to hit HTTP timeouts
+  unstreamed. Three shape differences are load-bearing: a refusal has no
+  single stop reason and arrives either as a `refusal` content part *or* as
+  `incomplete_details.reason == "content_filter"`, so both are checked;
+  truncation is `incomplete_details.reason == "max_output_tokens"`;
+  `ReviewResult.Fallback` is never set, because there is no server-side
+  fallback and a synthesised one would misreport which model answered.
+  Effort passes through untranslated — the repo's `low|medium|high|xhigh|max`
+  is a subset of the API's accepted values.
+
+  Strict mode needs the schema translated, and `openai.strictSchema` does it
+  in the provider rather than by editing the shared schema, which stays the
+  validation source of truth and is what the Anthropic provider sends
+  verbatim. It is a narrow rewrite, not a converter: `const` becomes a
+  single-value `enum` (equivalent, and accepted), a property that carried
+  only a `const` gains the `type` strict mode requires, and `$schema` is
+  dropped as dialect metadata. A test walks the translated schema asserting
+  every object is structurally strict, so a future schema edit that breaks it
+  fails locally instead of at the API.
+
+  What is left is the paid step: no OpenAI recording exists, and no model has
+  been verified, which is why `providerDefaults` still leaves its model
+  empty. The corpus can drive any provider via
+  `THREATCL_DRIFT_CORPUS_PROVIDER` / `THREATCL_DRIFT_CORPUS_MODEL`, both
+  resolved through `config.WithProvider` so the harness selects a provider
+  exactly as the action does.
 
 ## Siblings
 

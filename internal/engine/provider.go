@@ -18,6 +18,7 @@ import (
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/llm"
 	"github.com/threatcl/drift-action/internal/llm/anthropic"
+	"github.com/threatcl/drift-action/internal/llm/openai"
 )
 
 // NewProvider builds the live provider cfg names. Record and replay wrap the
@@ -33,6 +34,13 @@ func NewProvider(cfg config.Config, apiKey string) (llm.Provider, error) {
 	switch cfg.Provider {
 	case config.ProviderAnthropic, "":
 		return anthropic.New(anthropic.Options{
+			Model:     cfg.Model,
+			APIKey:    apiKey,
+			Effort:    cfg.Effort,
+			MaxTokens: cfg.MaxTokens,
+		}), nil
+	case config.ProviderOpenAI:
+		return openai.New(openai.Options{
 			Model:     cfg.Model,
 			APIKey:    apiKey,
 			Effort:    cfg.Effort,

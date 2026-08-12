@@ -88,17 +88,15 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 	}
 	if fc.LLM != nil {
 		if fc.LLM.Provider != "" {
-			if !knownProvider(fc.LLM.Provider) {
-				return c, fmt.Errorf("%s: llm.provider must be %s, got %q",
-					path, knownProviders(), fc.LLM.Provider)
+			// WithProvider re-derives the model and key env, which are the
+			// departing provider's until it does. It runs before this same
+			// block's llm.model and llm.api_key_env, so an explicit choice
+			// still overrides what it derived.
+			updated, err := c.WithProvider(fc.LLM.Provider)
+			if err != nil {
+				return c, fmt.Errorf("%s: %w", path, err)
 			}
-			if fc.LLM.Provider != c.Provider {
-				// The model and key env currently in hand are the departing
-				// provider's. Re-derive before this same block's llm.model
-				// and llm.api_key_env get their chance to override.
-				c = c.withProviderDefaults(fc.LLM.Provider)
-			}
-			c.Provider = fc.LLM.Provider
+			c = updated
 		}
 		if fc.LLM.Model != "" {
 			c.Model = fc.LLM.Model

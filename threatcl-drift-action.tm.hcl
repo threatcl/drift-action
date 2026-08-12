@@ -197,14 +197,20 @@ threatmodel "threatcl-drift-action" {
     stride      = ["Repudiation", "Denial Of Service"]
 
     control "Refusal, truncation and fallback handling" {
-      description    = "internal/llm/anthropic/anthropic.go checks stop_reason before content is read and a refusal renders as could-not-assess, never no-drift; truncation is a hard error, never a half-review; fallbacks are detected from usage.iterations and the comment names the model that actually served the review"
+      description    = "Both providers check every terminal condition before any output is read, and both render a refusal as could-not-assess, never no-drift, with truncation a hard error rather than a half-review. internal/llm/anthropic/anthropic.go reads stop_reason, detects fallbacks from usage.iterations, and the comment names the model that actually served the review. internal/llm/openai/openai.go has no single stop reason to read: a refusal arrives either as a refusal content part alongside the text parts or as incomplete_details.reason content_filter, so it checks both, and it never sets ReviewResult.Fallback because that API has no server-side fallback to report — a synthesised one would misreport which model answered. Each provider's refusal and truncation paths are covered by unit tests against a recorded response rather than a live call"
       implemented    = true
       risk_reduction = 60
     }
   }
 
   third_party_dependency "Anthropic API" {
-    description       = "Hosted LLM inference for every review; receives the repository source excerpts and diff described by the 'repository source code' asset. The only inference provider in v0"
+    description       = "Hosted LLM inference; receives the repository source excerpts and diff described by the 'repository source code' asset. The default provider, and the one every committed corpus recording was made against"
+    saas              = true
+    uptime_dependency = "hard"
+  }
+
+  third_party_dependency "OpenAI API" {
+    description       = "The alternative inference provider, selected by llm.provider in .threatcl-ci.hcl. It receives exactly the same repository source excerpts and diff as the Anthropic API when configured, so the disclosure boundary is identical and only the recipient changes — a repository choosing it is choosing which third party sees its code. Not reached at all unless configured, but a hard dependency for any repository that does"
     saas              = true
     uptime_dependency = "hard"
   }

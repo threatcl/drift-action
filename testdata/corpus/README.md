@@ -29,6 +29,22 @@ exercises the harness, the schema, and the evidence rule for free, but says
 nothing about the current prompt. When a recording's fingerprint no longer
 matches the assembled request, the case logs it; re-record to re-measure.
 
+### Running another provider
+
+`THREATCL_DRIFT_CORPUS_PROVIDER` picks the provider; `THREATCL_DRIFT_CORPUS_MODEL`
+names the model, which is required for a provider that has no default:
+
+```bash
+THREATCL_DRIFT_CORPUS=record \
+THREATCL_DRIFT_CORPUS_PROVIDER=openai \
+THREATCL_DRIFT_CORPUS_MODEL=… \
+OPENAI_API_KEY=… go test ./internal/corpus -v -timeout 60m
+```
+
+A second provider earns its place by passing these same seven cases —
+including `clean`, which must stay clean — under its own recordings. Because
+recordings are per provider, doing that never touches the existing baseline.
+
 A case with no recording for the configured provider **fails**. This suite is
 CI's only finding-quality gate, so a missing recording has to be a red build
 rather than a case that quietly drops out of it — adding a case means

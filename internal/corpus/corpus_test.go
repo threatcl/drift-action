@@ -46,6 +46,42 @@ import (
 // skips inference entirely, so `go test ./...` never costs money.
 const modeEnv = "THREATCL_DRIFT_CORPUS"
 
+// providerEnv and modelEnv point the corpus at a provider other than the
+// default. A second provider earns its place by passing these same seven
+// cases under its own recordings, so the harness has to be able to run any
+// of them — recordings are per provider and do not collide.
+//
+// modelEnv exists because a provider need not have a default model: openai
+// deliberately has none until one has been verified, and recording is how it
+// gets verified.
+const (
+	providerEnv = "THREATCL_DRIFT_CORPUS_PROVIDER"
+	modelEnv    = "THREATCL_DRIFT_CORPUS_MODEL"
+)
+
+// corpusConfig builds the config for a corpus run, honouring the provider and
+// model overrides. It goes through config.WithProvider rather than assigning
+// the field, so the corpus resolves a provider exactly as the action does.
+func corpusConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg := config.Default()
+
+	if provider := os.Getenv(providerEnv); provider != "" {
+		var err error
+		cfg, err = cfg.WithProvider(provider)
+		if err != nil {
+			t.Fatalf("%s: %v", providerEnv, err)
+		}
+	}
+	if model := os.Getenv(modelEnv); model != "" {
+		cfg.Model = model
+	}
+	if cfg.Model == "" {
+		t.Fatalf("provider %q has no default model; set %s", cfg.Provider, modelEnv)
+	}
+	return cfg
+}
+
 // TestRepoThreatModel guards this repository's own dogfooding: the root
 // threat model must always load through the engine, and every file its prose
 // references must exist — those references are what context stuffing and
@@ -268,10 +304,11 @@ func TestCorpus(t *testing.T) {
 		t.Fatalf("%s is %q, want live, record or replay", modeEnv, mode)
 	}
 
-	cfg := config.Default()
+	cfg := corpusConfig(t)
 	if mode != "replay" && os.Getenv(cfg.APIKeyEnv) == "" {
 		t.Fatalf("%s=%s needs %s set", modeEnv, mode, cfg.APIKeyEnv)
 	}
+	t.Logf("provider %s, model %s", cfg.Provider, cfg.Model)
 
 	for _, name := range caseNames(t) {
 		t.Run(name, func(t *testing.T) {

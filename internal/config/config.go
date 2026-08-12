@@ -112,6 +112,20 @@ func Default() Config {
 	return cfg.withProviderDefaults(ProviderAnthropic)
 }
 
+// WithProvider selects a provider and re-derives the settings that follow
+// from it. An unknown name is refused here, so a typo cannot survive to
+// review time with the diff already fetched.
+func (c Config) WithProvider(provider string) (Config, error) {
+	if !knownProvider(provider) {
+		return c, fmt.Errorf("llm.provider must be %s, got %q", knownProviders(), provider)
+	}
+	if provider != c.Provider {
+		c = c.withProviderDefaults(provider)
+	}
+	c.Provider = provider
+	return c, nil
+}
+
 // withProviderDefaults sets the settings derived from provider. It overwrites
 // rather than filling blanks, because it runs when the provider changes and
 // the values it replaces belong to the provider being left behind. The config
