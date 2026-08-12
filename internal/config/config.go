@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
 
@@ -17,6 +18,38 @@ const (
 
 // DefaultConfigPath is the repo-relative location of the drift config file.
 const DefaultConfigPath = ".threatcl-ci.hcl"
+
+// Providers the engine can run inference through.
+const (
+	ProviderAnthropic = "anthropic"
+	ProviderOpenAI    = "openai"
+)
+
+// providerDefault holds the settings that follow from which provider is
+// selected, rather than standing on their own.
+type providerDefault struct {
+	Model     string
+	APIKeyEnv string
+}
+
+// providerDefaults is the one list of known providers: knownProvider reads it
+// too, so adding a provider here is all it takes to make it configurable.
+//
+// These cannot simply be fixed in Default(). The provider is not known until
+// the config file has been read, so a file that selects a different one has
+// to re-derive them — otherwise selecting openai and saying nothing else
+// leaves an Anthropic model name and ANTHROPIC_API_KEY in place, and the run
+// fails at inference time with the diff already fetched.
+var providerDefaults = map[string]providerDefault{
+	ProviderAnthropic: {Model: "claude-opus-5", APIKeyEnv: "ANTHROPIC_API_KEY"},
+
+	// gpt-5.6-sol is the verified default, not a guess: it is the model the
+	// committed OpenAI corpus recordings were made against, passing all seven
+	// finding-quality cases including clean. Structured-output support is
+	// model-specific, so changing this means re-recording the corpus and
+	// re-reading the results, exactly as it does for the Anthropic default.
+	ProviderOpenAI: {Model: "gpt-5.6-sol", APIKeyEnv: "OPENAI_API_KEY"},
+}
 
 // Config carries the engine's settings. Resolution order: Default, overlaid
 // by the repo's .threatcl-ci.hcl, overlaid by action inputs via FromEnv.
@@ -61,19 +94,46 @@ type Config struct {
 }
 
 func Default() Config {
-	return Config{
+	cfg := Config{
 		ConfigPath:      DefaultConfigPath,
 		FailMode:        FailNever,
-		Provider:        "anthropic",
-		Model:           "claude-opus-5",
+		Provider:        ProviderAnthropic,
 		Effort:          "high",
 		MaxTokens:       32_000,
-		APIKeyEnv:       "ANTHROPIC_API_KEY",
 		MaxDiffFiles:    200,
 		MaxPatchBytes:   400_000,
 		MaxContextBytes: 200_000,
 		NarrowAbove:     diff.DefaultNarrowAbove,
 	}
+	// Complete, not half-built: a caller that uses Default() on its own — the
+	// finding-quality corpus does — gets a config it can actually review with.
+	return cfg.withProviderDefaults(ProviderAnthropic)
+}
+
+// WithProvider selects a provider and re-derives the settings that follow
+// from it. An unknown name is refused here, so a typo cannot survive to
+// review time with the diff already fetched.
+func (c Config) WithProvider(provider string) (Config, error) {
+	if !knownProvider(provider) {
+		return c, fmt.Errorf("llm.provider must be %s, got %q", knownProviders(), provider)
+	}
+	if provider != c.Provider {
+		c = c.withProviderDefaults(provider)
+	}
+	c.Provider = provider
+	return c, nil
+}
+
+// withProviderDefaults sets the settings derived from provider. It overwrites
+// rather than filling blanks, because it runs when the provider changes and
+// the values it replaces belong to the provider being left behind. The config
+// file's own llm.model and llm.api_key_env are applied after it, and the
+// action inputs after those, so an explicit choice still wins.
+func (c Config) withProviderDefaults(provider string) Config {
+	defaults := providerDefaults[provider]
+	c.Model = defaults.Model
+	c.APIKeyEnv = defaults.APIKeyEnv
+	return c
 }
 
 // DryRunEnv is a shell-friendly alias for the dry-run input. The action input
@@ -106,10 +166,64 @@ func (c Config) FromEnv() (Config, error) {
 }
 
 // FromEnv overlays the action inputs onto the built-in defaults. Callers that
-// also read a config file should use Default, LoadFile, then Config.FromEnv so
-// the inputs stay the highest-precedence layer.
+// also read a config file want Load, which layers all three in the right
+// order and validates the result.
 func FromEnv() (Config, error) {
 	return Default().FromEnv()
+}
+
+// Load resolves the engine's configuration for the checkout at workspace:
+// built-in defaults, overlaid by the repo's config file, overlaid by the
+// action inputs — inputs are the highest-precedence layer.
+//
+// FromEnv runs twice on purpose. The first pass supplies config-path, which
+// decides which file is read at all; the second restores input precedence
+// over whatever that file set. The second pass also repairs the case a single
+// pass gets wrong: a file that selects a different provider re-derives the
+// model for it, and only a later input pass can put an explicit model input
+// back on top of that.
+//
+// Validation happens here rather than in LoadFile because it needs the
+// finished config — whether a model is set is not answerable until the last
+// layer has been applied.
+func Load(workspace string) (Config, error) {
+	cfg, err := Default().FromEnv()
+	if err != nil {
+		return cfg, err
+	}
+	cfg, err = cfg.LoadFile(filepath.Join(workspace, cfg.ConfigPath))
+	if err != nil {
+		return cfg, err
+	}
+	cfg, err = cfg.FromEnv()
+	if err != nil {
+		return cfg, err
+	}
+	return cfg, cfg.validate()
+}
+
+// validate rejects a config that cannot produce a review. It runs before the
+// diff is fetched: every check here is one a run would otherwise fail after
+// spending a compare API call and, worse, after the reader has been told a
+// review is in progress.
+func (c Config) validate() error {
+	// Both shipped providers carry a verified default, so this fires only for
+	// a provider added to providerDefaults without one. Keeping it means that
+	// omission surfaces here rather than as an empty model reaching the API.
+	if c.Model == "" {
+		return fmt.Errorf(
+			"llm.model must be set when llm.provider is %q: it has no default model, because structured-output support is model-specific and has to be verified per model",
+			c.Provider)
+	}
+	// The config-file path has always rejected a bad fail_mode; the action
+	// input path did not, so a typo in the fail-mode input degraded silently
+	// to "never". Someone who believes their pull requests are gated must
+	// never be quietly ungated.
+	if c.FailMode != FailNever && c.FailMode != FailOnActionRequired {
+		return fmt.Errorf("fail_mode must be %q or %q, got %q",
+			FailNever, FailOnActionRequired, c.FailMode)
+	}
+	return nil
 }
 
 // boolEnv reads the first variable that is set among names. An unparseable

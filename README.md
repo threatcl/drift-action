@@ -11,12 +11,15 @@ findings — the CI counterpart of the
 [threatcl claude-plugin](https://github.com/threatcl/claude-plugin)'s
 `/threat-drift` command.
 
-> **Status: v0.** Finding quality is validated two ways — a corpus of paired
+It reviews threat model drift and nothing else — not bugs, style or test
+coverage. Drift is not "the `.tm.hcl` file changed"; it is divergence between
+what the code now does and what the model asserts.
+
+> **Status: v1.** Finding quality is validated two ways — a corpus of paired
 > threat models and diffs under `testdata/corpus/`, one case per drift
-> category plus a clean case, and continuous dogfooding on this repository's
-> own pull requests. Inputs, outputs and the config surface may still change
-> before v1, so pin a version. See
-> [docs/phase1-plan.md](docs/phase1-plan.md).
+> category plus a clean case, recorded against every supported provider, and
+> continuous dogfooding on this repository's own pull requests. The inputs,
+> outputs and config surface are settled; additions will be additive.
 
 ## What it detects
 
@@ -56,7 +59,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - uses: threatcl/drift-action@v0
+      - uses: threatcl/drift-action@v1
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
@@ -67,14 +70,14 @@ same sticky comment — last writer wins, possibly with findings from the older
 commit. Cancelling the in-flight run means the comment always reflects the
 newest push.
 
-`@v0` follows the latest v0.x release, which is what most repositories want.
+`@v1` follows the latest v1.x release, which is what most repositories want.
 It is a moving alias, though: it is force-moved onto each new release, so the
 engine reviewing your pull requests can change without you editing anything.
 Where that matters — the job holds an LLM API key and a token that can write
 to pull requests — pin the commit SHA instead and let Dependabot bump it:
 
 ```yaml
-- uses: threatcl/drift-action@<commit-sha> # v0.1.1
+- uses: threatcl/drift-action@<commit-sha> # v1.0.0
 ```
 
 This repository's own drift workflow pins the SHA, for exactly that reason.
@@ -84,7 +87,8 @@ This repository's own drift workflow pins the SHA, for exactly that reason.
 | Input | Default | Description |
 |-------|---------|-------------|
 | `config-path` | `.threatcl-ci.hcl` | Path to the drift config file |
-| `anthropic-api-key` | — | LLM API key; without one, no drift category is assessed |
+| `anthropic-api-key` | — | Anthropic API key; without one, no drift category is assessed |
+| `openai-api-key` | — | OpenAI API key, when `llm.provider` is `openai` |
 | `github-token` | `${{ github.token }}` | Reads the PR diff, writes the comment/check |
 | `fail-mode` | from config | `never` \| `on-action-required` |
 | `model` | from config | Override the LLM model |
@@ -97,7 +101,7 @@ of writing to the pull request. Use it to trial the action on real PRs before
 letting it comment:
 
 ```yaml
-- uses: threatcl/drift-action@v0
+- uses: threatcl/drift-action@v1
   with:
     dry-run: true
 ```
@@ -223,6 +227,29 @@ limits {
 An unknown category, fail mode, effort level or provider is a hard error
 rather than a silent default, so a typo can never quietly disable a drift
 check or fail the request after the diff has already been fetched.
+
+`model` and `api_key_env` follow from `provider` when you do not set them, so
+selecting a provider is usually all you need:
+
+```hcl
+llm {
+  provider = "openai"
+}
+```
+
+Pass the matching key with the `openai-api-key` input. Both key inputs are
+forwarded to the container, and the engine reads only the one its provider
+names — so switching provider is a config-file change, not a workflow change,
+as long as the key is wired up.
+
+`anthropic` defaults to `claude-opus-5`, `openai` to `gpt-5.6-sol`. Both are
+the models the committed finding-quality recordings were made against, on a
+corpus of one case per drift category plus a clean case that must stay clean.
+Overriding `model` is supported and sometimes right, but forced-JSON support
+varies by model, so an unverified one can fail the run after the diff has
+already been fetched. Setting `api_key_env` to something other than the two
+names above only works if your workflow puts that variable into the container
+itself.
 
 `max_tokens` bounds the model's output *including* its thinking. Too tight and
 the report is truncated mid-JSON, which the run reports as an error rather than

@@ -2,8 +2,43 @@
 
 Self-hosted GitHub Action that reviews pull requests for threat model drift —
 divergence between what the code does and what the repo's Threatcl `.tm.hcl`
-asserts. Phase 1 of a larger roadmap; the committed scope is
-`docs/phase1-plan.md`.
+asserts. It is the detection half of a pair: this action finds drift on the
+PR, and the claude-plugin's `/threat-drift` remediates it from the agent
+prompt each finding carries.
+
+Drift is **not** "the `.tm.hcl` changed". It is divergence between what the
+code now does and what the model asserts, in six categories: stale
+assertions, phantom controls, unmodeled surface, DFD drift, dependency drift,
+unclassified data.
+
+## Pipeline
+
+Deterministic first, inference second — facts are extracted before the model
+is asked anything.
+
+1. **Parse** the threat model via `threatcl/spec` into structured assertions,
+   with line numbers recovered separately. → `internal/model`
+2. **Fetch and filter** the diff from the GitHub compare API down to the
+   review set. Nothing relevant changed → no inference at all.
+   → `internal/diff`
+3. **Extract facts** from dependency manifests: what changed, with line
+   numbers. Facts for the prompt, never findings — whether a change matters
+   is judgement, and judgement belongs to the model. → `internal/deps`
+4. **Assemble and infer**: one shot, model assertions + filtered diff +
+   targeted context stuffing (whole files that plausibly back touched
+   controls, so "was the backing code removed?" is answerable beyond the
+   hunks), forced to the findings schema. → `internal/engine`, `internal/llm`
+5. **Render**: our code, never the model, turns the validated report into the
+   sticky comment and check run. → `internal/render`, `internal/gh`
+
+## Out of scope (deliberately, not yet-to-do)
+
+- General code review — bugs, style, tests. Threat drift only.
+- Agentic repo exploration during inference. Revisit only if single-shot plus
+  targeted context stuffing proves insufficient on phantom controls.
+- Auto-committing model updates to the PR. The agent-prompt handoff keeps a
+  human and the claude-plugin in the loop on purpose.
+- GitLab/Bitbucket.
 
 ## Decisions (do not relitigate)
 
@@ -17,7 +52,7 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
 - **2026-08:** Docker container action. `image: Dockerfile` while iterating;
   switch `action.yml` to `docker://ghcr.io/threatcl/drift-action:vX.Y.Z` at
   first release (sibling threatcl-action pattern).
-- **2026-08:** Anthropic provider only in v0, behind `internal/llm.Provider`.
+- **2026-08:** Anthropic provider first, behind `internal/llm.Provider`.
   OpenAI/Vertex later, once finding quality is validated.
 - **2026-08:** PR diff comes from the GitHub compare API, not git-in-container.
   Keeps the final image distroless/static, avoids `fetch-depth: 0` and
@@ -53,7 +88,9 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   the report body.
 - **Sticky marker:** `<!-- threatcl-drift-action -->` (defined once, in
   `internal/render`). It is a compatibility contract — changing it orphans
-  comments on existing PRs.
+  comments on existing PRs. The upsert matches on **author as well as
+  marker**: someone quoting the review in their own comment would otherwise
+  have that comment silently overwritten by the next push.
 - **Docs and examples always use `pull_request`**, never
   `pull_request_target`.
 - **Diff filtering defaults to keep.** `internal/diff.Filter` removes only
@@ -82,8 +119,11 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
 - Anthropic structured outputs don't support `minItems`, so "≥1 evidence per
   finding" cannot be enforced schema-side — that's why `findings.Sanitize`
   exists.
-- Structured-outputs model support is model-specific; default is
-  `claude-opus-5` (`internal/config`). Verify support before changing it.
+- Structured-outputs model support is model-specific. Defaults are
+  `claude-opus-5` and `gpt-5.6-sol` (`config.providerDefaults`), and both are
+  the models the committed corpus recordings were made against. Changing
+  either means re-recording that provider's corpus, not just editing the
+  constant.
 - `threatcl/spec` discards source ranges: its structs carry no `hcl.Range` and
   its `hclparse.Parser` is never returned. `internal/model.LineIndex` re-parses
   the file with `hclsyntax` to recover line numbers, and joins to spec's
@@ -94,7 +134,12 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   safeguards, and we send security-relevant diffs. A refusal arrives as
   HTTP 200 with `stop_reason: "refusal"` and possibly an empty content array —
   check the stop reason before reading content, and render a refusal as
-  "could not assess", never as "no drift".
+  "could not assess", never as "no drift". The OpenAI provider needs the same
+  outcome from a different shape: no stop reason, but either a `refusal`
+  content part beside the text parts or `incomplete_details.reason ==
+  "content_filter"`. Both are checked before any output is read, because a
+  refusal's output text is empty and reading it first turns a declined review
+  into a silent one.
 - Server-side fallbacks are on by default (`fallbacks: "default"` plus the
   `server-side-fallback-2026-07-01` beta), which puts the provider on the
   **beta** message surface: `client.Beta.Messages.NewStreaming` and the whole
@@ -105,6 +150,41 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   model that served the review.
 - `max_tokens` caps thinking *plus* output. Hitting it truncates the report
   mid-JSON; that is an error, never a rendered half-review.
+- The partial-contradiction rule in `prompts/drift-ci.md` — an assertion still
+  true but now incomplete is `review_recommended`, not `action_required` — is
+  what keeps `fail_mode = on-action-required` from flipping a build on
+  judgement wobble. Severity is enforced only in the prompt, so loosening that
+  rule changes CI outcomes with nothing in code to catch it.
+- `internal/engine` owns `NewProvider` and `AssembleRequest` because `main`
+  and the corpus must build the *same* request. They once didn't: the corpus
+  assembled its own and silently stopped setting `Categories`, so the corpus
+  measured a prompt the action never sent. It sits above `internal/llm`
+  because the provider packages import `llm`, so `llm` cannot import them.
+- Provider settings cascade. `config.providerDefaults` is the single list of
+  known providers (`knownProvider` reads it), and `Model`/`APIKeyEnv` are
+  *derived* from the provider, re-derived when a config file switches it.
+  That is why `config.Load` runs `FromEnv` twice: the first pass supplies
+  `config-path`, and only a second can put an explicit `model` input back
+  above a provider switch. Validation runs at the end, on the finished config.
+- `openai.strictSchema` translates the shared schema for strict mode inside
+  the provider — the schema itself stays the validation source of truth and
+  goes to Anthropic verbatim. Narrow by design: `const` becomes a
+  single-value `enum`, a const-only property gains the `type` strict mode
+  requires, `$schema` is dropped. A test walks the result asserting every
+  object is structurally strict, so a schema edit that breaks it fails
+  locally rather than at the API.
+- The corpus asserts category and cited file, never severity or primary
+  category — the two providers legitimately disagree there (on `dfd-drift`
+  Anthropic leads with `unmodeled_surface`, OpenAI with `dfd_drift`) while
+  agreeing on which cases are `action_required`. Tightening those assertions
+  would break one provider for a difference that is judgement, not error.
+- Dogfooding wiring: `threatcl-drift-action.tm.hcl` is guarded by
+  `TestRepoThreatModel` — it must load, and every prose-referenced path must
+  exist, because those references are what context stuffing hangs off.
+  `.threatcl-ci.hcl` sets `trigger_paths = ["prompts/"]`: `.md` is filter
+  noise, but a prompt edit changes the reviewer itself. Spec's DFD slugifier
+  splits every capital (`PR Author` → `p_r_author`), so the DFD flows use
+  quoted-name refs rather than dot notation.
 - Inference error text never reaches the comment. A schema-validation failure
   quotes the model's output, which the pull request's own diff shaped — so
   `findings.ErrInvalidOutput` is matched and the engine supplies its own
@@ -116,87 +196,53 @@ asserts. Phase 1 of a larger roadmap; the committed scope is
   replayed run must always disclose itself in the comment and must re-validate
   the recorded report against the schema — a fixture is not trusted more than a
   live response, and it must never be able to pass for one.
+- The corpus replay fails closed both ways: a case with no recording for the
+  configured provider fails, and a recording whose fingerprint no longer
+  matches the assembled request fails. `fixture.Digest` covers
+  `ReviewRequest.Sections()` and deliberately *not* its `Prompt`, so editing
+  `prompts/drift-ci.md` stales nothing — what forces a re-record is a change
+  to assembly (`internal/llm/sections.go`, the `N→` prefixes, `deps.Render`,
+  context selection) or to a case's inputs, which is exactly when the old
+  recording has stopped describing what the model sees.
 
 ## State
 
-Milestones 1 and 2 are done. The action runs end to end and actually reviews:
-config parsing, model discovery and line indexing, assertion rendering, the
-GitHub compare/comment/check-run client, diff filtering and rendering, manifest
-fact extraction, targeted context stuffing, the Anthropic provider (streaming,
-forced JSON, refusal handling, server-side fallbacks), schema validation, the
-comment renderer, and `dry-run`.
+Complete and released. Everything in the pipeline above runs in production —
+config, model discovery and line indexing, diff filtering, manifest facts,
+context stuffing, inference, schema validation, the comment renderer, the
+check run wired to `fail_mode`, and `dry-run`.
 
-Milestone 3 is polish and dogfooding. Done: check-run conclusions wired to
-`fail_mode`; the `max_diff_files` hard cap (applied to the post-filter review
-set, all-or-nothing, with the "run locally" message — `ContextInfo.OverCap`);
-`llm.provider` validated at config time like every other enum; the sticky
-comment matched on author as well as marker (a user quoting the review must
-never have their comment edited); a `concurrency:` block in the scaffolded
-workflow so rapid pushes supersede instead of racing the comment; and the
-finding-quality corpus under `testdata/corpus/` — seven cases, one per
-category plus clean, harness in `internal/corpus` gated on
-`THREATCL_DRIFT_CORPUS=live|record|replay`. The corpus's first paid run is
-recorded and committed: all seven cases passed (clean case included), so
-those recordings are the quality baseline. Since then three review-quality
-changes landed: coverage warnings render above the fold (`writeWarnings`;
-the collapsed context block is never the only disclosure), context files are
-sent with `N→` line-number prefixes (citations were landing 1–3 lines off
-from hunk-header arithmetic), and the severity rules gained a
-partial-contradiction rule (still-true-but-incomplete assertions are
-`review_recommended`, so `fail_mode` can't flip on judgement wobble). Those
-three were then re-recorded and measured on the corpus: citations landed
-exactly, and dfd-drift went from three build-failing findings to one.
+Two providers ship, Anthropic and OpenAI, both validated against the
+seven-case corpus and agreeing on which cases are `action_required` — so
+`fail_mode` does not depend on which one a repo picks. The corpus replay is
+CI's only finding-quality gate and now fails closed both ways.
 
-Dogfooding is live and the loop closed on PR #8: the action reviewed the PR
-that switched it on, found two real gaps in this repo's own threat model,
-the agent prompts remediated them in a separate session, and the re-review
-came back `no_drift` with a `success` check run — the conclusion reserved for
-a run that actually assessed and found consistency. Milestone 3 is therefore
-done except for the release itself.
+Dogfooding is live on this repo's own pull requests, and has already found
+real gaps in this repo's own threat model that the agent-prompt handoff then
+remediated.
 
-v0.1.0 and v0.1.1 are released. The two-tag bootstrap went as planned: v0.1.0
-published an image while `action.yml` still said `Dockerfile`, v0.1.1 flipped
-to `docker://` — pinning v0.1.0's image *by digest* — and moved the dogfood
-workflow onto a released SHA.
-
-**A release is now a `workflow_dispatch`, not a tag push.** `release.yml`
-publishes the image first, reads back its digest, commits that digest into
-`action.yml` on `main`, then tags that commit and moves `v0`. Pushing a tag by
-hand publishes nothing. The inversion exists because a digest can only name an
-image that already exists, so the old tag-first order could pin only
-`:vX.Y.Z` — a mutable registry pointer — and every release after v0.1.1 would
-have shipped a weaker pin than v0.1.1 did. `docs/RELEASING.md` holds the
-procedure and the partial-failure recovery table; read it before dispatching,
-the ordering is load-bearing. The registry gets exactly one tag per release
-and no `:latest`: a floating pointer no documented path references is only a
-way to be wrong.
+A release is a **`workflow_dispatch`, not a tag push**. `release.yml` publishes
+the image, reads back its digest, commits that digest into `action.yml` on
+`main`, tags that commit, and moves the major alias; pushing a tag by hand
+publishes nothing. The order is load-bearing — a digest can only name an image
+that already exists — so read `docs/RELEASING.md`, which holds the procedure
+and the partial-failure recovery table, before dispatching. v0.1.0 through
+v0.1.2 shipped; v1 is the next cut and the docs already name it.
 
 ## Open items
 
-- Config file name `.threatcl-ci.hcl` is settled; the claude-plugin's
-  `/threat-ci` scaffolder still needs updating to emit it (and the workflow
-  with the `concurrency:` block and a pinned release). The threatcl editor
-  LSP also flags `.threatcl-ci.hcl` as an invalid threat model — it should
-  learn to skip the file, as engine discovery already does.
-- Dogfooding is wired in this repo: root `threatcl-drift-action.tm.hcl`
-  (guarded by `TestRepoThreatModel` — it must load, and every prose-referenced
-  path must exist), `.threatcl-ci.hcl` with `trigger_paths = ["prompts/"]`
-  (`.md` is filter noise, but prompt edits change the reviewer itself), and
-  `.github/workflows/threat-drift.yml` pinning `threatcl/drift-action` to a
-  released commit SHA — never `@v0`, which is force-moved every release and
-  would leave this privileged job's engine mutable; Dependabot bumps the SHA.
-  Any change to how that job resolves the action has to move the "Pin the
-  workflow to the released action" control with it, or the action reports a
-  phantom control against its own model. Spec's DFD slugifier
-  splits every capital (`PR Author` → `p_r_author`), so the DFD flows use
-  quoted-name refs instead of dot notation.
-- A second provider (OpenAI) is unblocked now that finding quality is
-  validated, and is the v0.2.0 candidate. It earns its place by passing the
-  same seven corpus cases under its own recordings — the harness currently
-  hardcodes the Anthropic constructor, so it needs parameterising by provider
-  first. Structured-outputs shape, refusal signalling and the absence of a
-  server-side-fallback equivalent all differ; `ReviewResult.Fallback` stays
-  Anthropic-only.
+- The claude-plugin's `/threat-ci` scaffolder still emits the wrong thing: it
+  needs to write `.threatcl-ci.hcl` and a workflow with a `concurrency:`
+  block, a pinned ref and `pull_request`. The threatcl editor LSP also flags
+  `.threatcl-ci.hcl` as an invalid threat model — it should skip the file, as
+  engine discovery already does. Tracked in this repo because `/threat-ci` is
+  this action's on-ramp, but the work lands in `../claude-plugin`.
+- Vertex is the next provider candidate and faces the same bar the other two
+  cleared: all seven corpus cases under its own recordings, `clean` included.
+  `ReviewResult.Fallback` stays Anthropic-only — do not invent an equivalent.
+- A fork contributor who changes request assembly cannot re-record the corpus,
+  having no key and no secrets on a fork run, so a maintainer re-records on
+  the branch. Accepted, and recorded in the threat model.
 
 ## Siblings
 

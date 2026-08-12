@@ -2,7 +2,11 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -84,12 +88,15 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 	}
 	if fc.LLM != nil {
 		if fc.LLM.Provider != "" {
-			if !knownProvider(fc.LLM.Provider) {
-				return c, fmt.Errorf(
-					"%s: llm.provider must be \"anthropic\" (v0 supports anthropic only), got %q",
-					path, fc.LLM.Provider)
+			// WithProvider re-derives the model and key env, which are the
+			// departing provider's until it does. It runs before this same
+			// block's llm.model and llm.api_key_env, so an explicit choice
+			// still overrides what it derived.
+			updated, err := c.WithProvider(fc.LLM.Provider)
+			if err != nil {
+				return c, fmt.Errorf("%s: %w", path, err)
 			}
-			c.Provider = fc.LLM.Provider
+			c = updated
 		}
 		if fc.LLM.Model != "" {
 			c.Model = fc.LLM.Model
@@ -127,14 +134,22 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 }
 
 // knownProvider fails a provider typo at config time, like every other enum
-// here — main's provider switch would otherwise catch it only at review time,
-// after the diff has already been fetched.
+// here — the engine's provider switch would otherwise catch it only at review
+// time, after the diff has already been fetched. It reads providerDefaults so
+// the accepted set cannot drift from the set that has defaults.
 func knownProvider(provider string) bool {
-	switch provider {
-	case "anthropic":
-		return true
+	_, ok := providerDefaults[provider]
+	return ok
+}
+
+// knownProviders renders the accepted providers for an error message, sorted
+// so the text is stable across runs.
+func knownProviders() string {
+	names := slices.Sorted(maps.Keys(providerDefaults))
+	for i, name := range names {
+		names[i] = strconv.Quote(name)
 	}
-	return false
+	return strings.Join(names, " or ")
 }
 
 // knownEffort keeps a typo from reaching the API as a 400 mid-run, after the

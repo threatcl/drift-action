@@ -1,0 +1,61 @@
+{
+  "recorded_at": "2026-08-12T13:22:58Z",
+  "source": "corpus/dfd-drift",
+  "model": "gpt-5.6-sol",
+  "request_digest": "1144b20f70ed1ef70ad690ca498a55e685a7dfad1047ccc0d677f7ec3e06b796",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "1 action-required finding: the checkout service now sends Confidential order data to an external analytics collector absent from the DFD and third-party dependency model.",
+    "findings": [
+      {
+        "category": "dfd_drift",
+        "severity": "action_required",
+        "title": "Confidential order data now flows to an unmodeled analytics service",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 23,
+          "quote": "data_flow_diagram_v2 \"checkout\""
+        },
+        "evidence": [
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 9,
+            "note": "Defines a hosted external analytics collector URL."
+          },
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 13,
+            "note": "Begins serialization of an order analytics event."
+          },
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 16,
+            "note": "Includes the customer's email, which belongs to the Confidential order-history asset."
+          },
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 17,
+            "note": "Includes the order amount in the outbound payload."
+          },
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 22,
+            "note": "Posts the serialized order data to the external analytics service."
+          },
+          {
+            "file": "internal/orders/orders.go",
+            "line": 8,
+            "note": "Publishes analytics after each successful order insertion."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The checkout DFD models only Customer, Web App, and Orders Database, while the changed code introduces a direct outbound flow of Confidential order data to a new hosted external service."
+        },
+        "agent_prompt": "Update app.tm.hcl in data_flow_diagram_v2 \"checkout\" to model the new hosted analytics integration: add an external element for collector.example-analytics.com and a flow from \"Web App\" to that element carrying the Confidential \"order-history\" asset. Also add a third-party dependency assertion for the hosted analytics service. This is required because internal/orders/analytics.go:9 defines the external collector, lines 13-17 serialize order ID, customer email, and amount, line 22 sends them via HTTP, and internal/orders/orders.go:8 invokes this for every created order.",
+        "suggested_fix": "Add the analytics collector as a third-party dependency and DFD external element, with a Web App-to-collector flow carrying the order-history asset."
+      }
+    ]
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "recorded_at": "2026-08-12T13:23:04Z",
+  "source": "corpus/phantom-control",
+  "model": "gpt-5.6-sol",
+  "request_digest": "383a20bb6ede38d99ba5470f0ab4164a53758f4482924e35e5a2c5cc14c6b184",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "One action-required phantom control: POST /login rate limiting is still modeled as implemented, but its middleware now passes every request through without limiting.",
+    "findings": [
+      {
+        "category": "phantom_control",
+        "severity": "action_required",
+        "title": "Implemented login rate-limiting control is now a pass-through",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 17,
+          "quote": "control \"login rate limiting\" implemented=true"
+        },
+        "evidence": [
+          {
+            "file": "internal/auth/ratelimit.go",
+            "line": 5,
+            "note": "The updated comment only says the function wraps the login handler chain and no longer claims enforcement."
+          },
+          {
+            "file": "internal/auth/ratelimit.go",
+            "line": 6,
+            "note": "RateLimit remains defined but contains no rate-limiting logic."
+          },
+          {
+            "file": "internal/auth/ratelimit.go",
+            "line": 7,
+            "note": "The middleware returns the next handler directly, so requests are never limited."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "Strong: the changed implementation directly removes the behavior backing a control explicitly marked implemented."
+        },
+        "agent_prompt": "Update app.tm.hcl: in threat \"credential stuffing\", the control \"login rate limiting\" at line 17 is marked implemented = true and claims a per-IP token-bucket middleware in internal/auth/ratelimit.go, but this PR replaces RateLimit with a pass-through that returns next directly (internal/auth/ratelimit.go:6-7). Set implemented = false and revise the description to state that rate limiting is currently absent, or restore the per-IP token-bucket implementation before retaining implemented = true.",
+        "suggested_fix": "Set the \"login rate limiting\" control to implemented = false and update its description, or restore the claimed per-IP token-bucket middleware."
+      }
+    ]
+  }
+}

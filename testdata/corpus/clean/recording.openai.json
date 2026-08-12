@@ -1,0 +1,12 @@
+{
+  "recorded_at": "2026-08-12T13:22:07Z",
+  "source": "corpus/clean",
+  "model": "gpt-5.6-sol",
+  "request_digest": "9d161d35787d1c226b7e0cf5da36233d02805199c6c3df5c99aa4504413488be",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": true,
+    "summary": "No drift detected. The threat model is consistent with this logging timestamp precision change.",
+    "findings": []
+  }
+}

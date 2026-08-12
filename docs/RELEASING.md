@@ -3,21 +3,21 @@
 The action ships as a container image on ghcr. A release is a **workflow run,
 not a tag push**: you dispatch `.github/workflows/release.yml` with the version
 you want, and it publishes the image, writes that image's digest into
-`action.yml` on `main`, tags that commit, and moves the `v0` alias onto it.
+`action.yml` on `main`, tags that commit, and moves the major alias (`v1` for a `v1.x.y` release) onto it.
 
 Pushing a `vX.Y.Z` tag by hand publishes nothing. Nothing in `release.yml`
 triggers on a ref.
 
 ## What a consumer actually references
 
-A consumer writes `uses: threatcl/drift-action@v0`. Git resolves `v0` to the
+A consumer writes `uses: threatcl/drift-action@v1`. Git resolves `v1` to the
 released commit, GitHub reads *that commit's* `action.yml`, and `action.yml`
 names an exact image. The ref moves; the engine behind it stays pinned.
 
 Pinned by **digest** — `docker://ghcr.io/threatcl/drift-action@sha256:…` — not
 by version tag. A ghcr tag is itself a mutable pointer that anyone with
 `packages: write` can repoint silently, the same class of problem as the
-force-moved `v0` alias, one link further down the chain. A digest names one
+force-moved major alias, one link further down the chain. A digest names one
 immutable manifest and the runner rejects anything else.
 
 That is the reason for the publish-before-tag order below. A digest can only
@@ -41,7 +41,7 @@ reason to cut a release.
    pushes.
 2. Merge it, and let CI go green on `main`.
 3. Actions → **release** → *Run workflow*, with `version` set to the version
-   you are cutting (`v0.1.2`). Dispatch it from `main`; the ref decides which
+   you are cutting (`v1.0.1`). Dispatch it from `main`; the ref decides which
    copy of the workflow runs, and the release is always cut from `main`'s tip
    regardless.
 4. Approve the run if the `release` environment asks — see below.
@@ -55,7 +55,7 @@ The workflow then, in order:
 - reads the pushed digest back, rewrites `action.yml`'s `image:` line to name
   it, and commits that to `main`
 - tags that commit `vX.Y.Z`
-- moves `v0` onto it
+- moves the major alias onto it
 
 So the tagged commit is the commit the image was built from, plus one line: the
 digest of that image. The difference cannot affect the image, because
@@ -63,7 +63,7 @@ digest of that image. The difference cannot affect the image, because
 container. The job refuses to continue if `main` moved between the build and
 the commit, so the two never drift further apart than that line.
 
-There is no longer a window where `@v0` resolves to an `action.yml` naming an
+There is no longer a window where `@v1` resolves to an `action.yml` naming an
 image that is not published yet. Publish happens first.
 
 ### Who can cut a release
@@ -103,7 +103,7 @@ engine that does not exist.
 | build and push | possibly a partial image, no tags | re-dispatch; if `:vX.Y.Z` did land, delete it first or the guard refuses |
 | digest rewrite, `main` moved, push to `main` | `:vX.Y.Z` published, unreferenced | re-dispatch the same version after deleting the ghcr image tag, or move to the next patch version |
 | tag push | as above, plus the digest commit on `main` | usually the app is not allowed to create `v*.*.*` — fix the ruleset, then tag that commit by hand or re-dispatch as the next version |
-| alias move | released, but `@v0` still names the previous release | re-run the job; the ancestry check passes once the commit is on `main` |
+| alias move | released, but `@v1` still names the previous release | re-run the job; the ancestry check passes once the commit is on `main` |
 
 An unreferenced image is inert: no git ref names it, so no consumer can resolve
 it. Clean it up or leave it, but do not repoint a published version tag at a
@@ -128,6 +128,22 @@ operation, so removing the version was what dropped them. No current path
 republishes either: the workflow has no ref trigger to re-enter, and `:latest`
 is off by decision rather than by accident.
 
+## What the v1 cut does to `@v0` consumers
+
+Nothing, and that is the problem worth stating plainly. The alias the release
+moves is derived from the version being cut — `release.yml` takes everything
+before the first dot — so a `v1.x.y` release moves `v1` and never touches
+`v0`. The *major alias moves only from the release workflow* ruleset already
+covers both refs, so no settings change is needed.
+
+The consequence is that `v0` freezes at v0.1.2 rather than breaking. Anyone
+still on `@v0` keeps a working action and silently stops receiving releases —
+no error, no warning, just an engine that stops improving. That is the correct
+behaviour for a major alias and the reason major aliases exist, but it means
+the v1 announcement has to tell consumers to move the ref themselves. Deleting
+`v0` to force the issue would break those workflows outright and is not worth
+it; leaving it pinned at the last v0 release is.
+
 ## How v0.1.0 and v0.1.1 were bootstrapped
 
 History, kept because it explains why v0.1.1's `action.yml` names the *v0.1.0*
@@ -148,12 +164,12 @@ read from the workspace at runtime. It is not a precedent: from v0.1.2 the
 workflow names the image it just built, so no release pins a predecessor's
 engine under a newer tag.
 
-## Why this repo's own job does not use `@v0`
+## Why this repo's own job does not use the major alias
 
-Consumers are pointed at `@v0` because following patches without editing a
+Consumers are pointed at `@v1` because following patches without editing a
 workflow is what most repositories want. This repository's drift job is the
 exception: it holds the Anthropic key and a token that can write to pull
-requests, and the release moves `v0` every time. Pinning it to the alias would
+requests, and the release moves the major alias every time. Pinning it to the alias would
 trade a PR-controlled engine for a dispatch-controlled one rather than for a
 fixed one — see the *Mutable major alias repointed at attacker-chosen code*
 threat in `threatcl-drift-action.tm.hcl`.
@@ -185,7 +201,7 @@ applies in reverse to anything that later loosens the pin.
       tip, not the dispatch ref
 - [ ] the `RELEASER_APP_ID` variable and `RELEASER_APP_PRIVATE_KEY` secret
       exist, and the release app can create `refs/tags/v*.*.*` as well as move
-      `refs/tags/v0`. Without the tag grant the release publishes an image and
+      the major alias `refs/tags/v1`. Without the tag grant the release publishes an image and
       then fails with nothing tagged
 
 `action.yml`'s image reference is no longer on this list. The workflow writes

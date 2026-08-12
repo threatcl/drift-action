@@ -1,0 +1,51 @@
+{
+  "recorded_at": "2026-08-12T13:23:27Z",
+  "source": "corpus/unclassified-data",
+  "model": "gpt-5.6-sol",
+  "request_digest": "c1b18078e9a528c9884a4c05b689c428d68e191775e26ced7dcab0ee10b6c2f4",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "One review-recommended drift finding: GET /profile now exposes tax ID and date of birth that are not covered by a modeled information asset.",
+    "findings": [
+      {
+        "category": "unclassified_data",
+        "severity": "review_recommended",
+        "title": "New tax ID and date-of-birth response data is not classified",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "Usernames and password hashes in the users table"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 11,
+            "note": "Adds TaxID as the JSON field tax_id in the profile API response type."
+          },
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 12,
+            "note": "Adds DateOfBirth as the JSON field date_of_birth in the profile API response type."
+          },
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 23,
+            "note": "Populates the newly exposed tax ID from the signed-in user's record."
+          },
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 24,
+            "note": "Populates the newly exposed date of birth from the signed-in user's record."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The change directly exposes two sensitive personal-data fields through GET /profile, while the only modeled information asset is limited to usernames and password hashes."
+        },
+        "agent_prompt": "Update app.tm.hcl in threat model \"login service\": add an information_asset block for profile personal data returned by GET /profile, explicitly covering email, tax ID, and date of birth with an appropriate sensitive classification. This is motivated by internal/httpapi/user.go:11-12 and :23-24, which add tax_id and date_of_birth to the profile response; the existing \"user credentials\" asset at app.tm.hcl:7 only covers usernames and password hashes.",
+        "suggested_fix": "Add a classified information asset for profile personal data covering email, tax ID, and date of birth returned by GET /profile."
+      }
+    ]
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "recorded_at": "2026-08-12T13:23:54Z",
+  "source": "corpus/unmodeled-surface",
+  "model": "gpt-5.6-sol",
+  "request_digest": "983f9d45713522d5c2dd85ac251df20cfcf47b3d999f45714cb3245411e330a9",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Two drift findings were identified (one action required and one review recommended); the highest-priority issue is the unmodeled, apparently unauthenticated bulk user export endpoint.",
+    "findings": [
+      {
+        "category": "unmodeled_surface",
+        "severity": "action_required",
+        "title": "Unauthenticated bulk user export endpoint is absent from the model",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 3,
+          "quote": "Login service exposing POST /login and GET /profile"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 9,
+            "note": "The existing GET /profile route is explicitly wrapped with requireSession."
+          },
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 10,
+            "note": "The new GET /admin/export route directly registers exportHandler without session or admin-authorization middleware."
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 15,
+            "note": "The handler iterates over every user returned by the store."
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 16,
+            "note": "Each user's ID, email, and creation time is written to the response."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The change adds an unmodeled, apparently unauthenticated HTTP endpoint that bulk-exports user data, directly expanding the service's exposed attack surface."
+        },
+        "agent_prompt": "Update app.tm.hcl in threat_model \"login service\" to include the new GET /admin/export endpoint added at internal/httpapi/routes.go:10. Add a threat for unauthorized bulk user export and describe its current authentication/authorization state; do not mark an access-control control as implemented unless the endpoint is wrapped with appropriate middleware. The route is registered without requireSession while internal/httpapi/export.go:15-16 exports every user's ID, email, and creation time.",
+        "suggested_fix": "Add GET /admin/export and an unauthorized bulk-export threat to the login service model, with controls matching the endpoint's actual access checks."
+      },
+      {
+        "category": "unclassified_data",
+        "severity": "review_recommended",
+        "title": "Exported email addresses and account metadata are unclassified",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "Usernames and password hashes in the users table"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 14,
+            "note": "The new CSV schema contains id, email, and created_at fields."
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 16,
+            "note": "The handler emits each user's email address and related account metadata."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "Email addresses and account metadata are personal data not covered by the narrowly defined user-credentials asset."
+        },
+        "agent_prompt": "Update app.tm.hcl by adding an information_asset block for user profile/export data, classified appropriately (for example Restricted), covering user IDs, email addresses, and account creation timestamps. The new CSV response declares these fields at internal/httpapi/export.go:14 and emits their values at line 16; the existing \"user credentials\" asset only covers usernames and password hashes.",
+        "suggested_fix": "Add a classified information asset for exported user profile data, including IDs, emails, and creation timestamps."
+      }
+    ]
+  }
+}

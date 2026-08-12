@@ -15,8 +15,10 @@
 //	THREATCL_DRIFT_CORPUS=record ANTHROPIC_API_KEY=… go test ./internal/corpus -v -timeout 60m
 //	THREATCL_DRIFT_CORPUS=replay go test ./internal/corpus -v
 //
-// record writes each case's review to <case>/recording.json; replay asserts
-// against those recordings without paying for inference.
+// record writes each case's review to <case>/recording.<provider>.json;
+// replay asserts against those recordings without paying for inference. In
+// replay mode a case with no recording fails — this suite is CI's quality
+// gate, so it must never pass by having measured nothing.
 package corpus
 
 import (
@@ -33,17 +35,52 @@ import (
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/deps"
 	"github.com/threatcl/drift-action/internal/diff"
+	"github.com/threatcl/drift-action/internal/engine"
 	"github.com/threatcl/drift-action/internal/findings"
 	"github.com/threatcl/drift-action/internal/llm"
-	"github.com/threatcl/drift-action/internal/llm/anthropic"
 	"github.com/threatcl/drift-action/internal/llm/fixture"
 	"github.com/threatcl/drift-action/internal/model"
-	"github.com/threatcl/drift-action/prompts"
 )
 
 // modeEnv selects how TestCorpus reviews: live, record, or replay. Unset
 // skips inference entirely, so `go test ./...` never costs money.
 const modeEnv = "THREATCL_DRIFT_CORPUS"
+
+// providerEnv and modelEnv point the corpus at a provider other than the
+// default. A second provider earns its place by passing these same seven
+// cases under its own recordings, so the harness has to be able to run any
+// of them — recordings are per provider and do not collide.
+//
+// modelEnv exists because a provider need not have a default model: openai
+// deliberately has none until one has been verified, and recording is how it
+// gets verified.
+const (
+	providerEnv = "THREATCL_DRIFT_CORPUS_PROVIDER"
+	modelEnv    = "THREATCL_DRIFT_CORPUS_MODEL"
+)
+
+// corpusConfig builds the config for a corpus run, honouring the provider and
+// model overrides. It goes through config.WithProvider rather than assigning
+// the field, so the corpus resolves a provider exactly as the action does.
+func corpusConfig(t *testing.T) config.Config {
+	t.Helper()
+	cfg := config.Default()
+
+	if provider := os.Getenv(providerEnv); provider != "" {
+		var err error
+		cfg, err = cfg.WithProvider(provider)
+		if err != nil {
+			t.Fatalf("%s: %v", providerEnv, err)
+		}
+	}
+	if model := os.Getenv(modelEnv); model != "" {
+		cfg.Model = model
+	}
+	if cfg.Model == "" {
+		t.Fatalf("provider %q has no default model; set %s", cfg.Provider, modelEnv)
+	}
+	return cfg
+}
 
 // TestRepoThreatModel guards this repository's own dogfooding: the root
 // threat model must always load through the engine, and every file its prose
@@ -160,9 +197,10 @@ func readChanges(t *testing.T, dir string) []diff.Change {
 	return changes
 }
 
-// assemble builds the review request for one case the same way the action
-// does: load the model, filter the diff, extract manifest facts, render, and
-// select context files from the workspace.
+// assemble builds the review request for one case through the same code the
+// action runs: engine.FilterChanges and engine.AssembleRequest. Reproducing
+// either here is how the corpus previously came to measure a request the
+// action does not send.
 func assemble(t *testing.T, dir string) llm.ReviewRequest {
 	t.Helper()
 	cfg := config.Default()
@@ -178,33 +216,27 @@ func assemble(t *testing.T, dir string) llm.ReviewRequest {
 	}
 
 	changes := readChanges(t, dir)
-	filtered := diff.Filter(changes, diff.Options{
-		ExtraPatterns: assertions.ReferencedPaths(),
-		NarrowAbove:   cfg.NarrowAbove,
-	})
+	filtered := engine.FilterChanges(cfg, assertions, changes)
 	if len(filtered.Kept) == 0 {
 		t.Fatalf("the filter kept none of the case's %d change(s); the review would assess nothing", len(changes))
 	}
 
-	diffText, tooLarge := diff.Render(filtered.Kept, cfg.MaxPatchBytes)
-	if len(tooLarge) > 0 {
-		t.Fatalf("case exceeds the patch budget: %s", strings.Join(tooLarge, ", "))
+	assembly := engine.AssembleRequest(cfg, engine.RequestInput{
+		Workspace:     workspace,
+		Assertions:    assertions,
+		Kept:          filtered.Kept,
+		ManifestFacts: deps.Facts(filtered.Kept),
+	})
+	// The action turns both of these into comment notes and reviews what is
+	// left. A corpus case is a fixed input that is supposed to fit, so either
+	// one means the case itself needs fixing.
+	if len(assembly.TooLarge) > 0 {
+		t.Fatalf("case exceeds the patch budget: %s", strings.Join(assembly.TooLarge, ", "))
 	}
-
-	selection := llm.SelectContext(workspace, assertions.ReferencedPaths(),
-		diff.Paths(filtered.Kept), cfg.MaxContextBytes)
-	if len(selection.Skipped) > 0 {
-		t.Fatalf("context files could not be read: %s", strings.Join(selection.Skipped, ", "))
+	if len(assembly.Skipped) > 0 {
+		t.Fatalf("context files could not be read: %s", strings.Join(assembly.Skipped, ", "))
 	}
-
-	return llm.ReviewRequest{
-		Prompt:          prompts.DriftCI,
-		ModelAssertions: assertions.Render(),
-		ManifestFacts:   deps.Render(deps.Facts(filtered.Kept)),
-		ContextFiles:    selection.Files,
-		Diff:            diffText,
-		Schema:          findings.SchemaJSON,
-	}
+	return assembly.Request
 }
 
 func readExpectation(t *testing.T, dir string) expectation {
@@ -272,10 +304,11 @@ func TestCorpus(t *testing.T) {
 		t.Fatalf("%s is %q, want live, record or replay", modeEnv, mode)
 	}
 
-	cfg := config.Default()
+	cfg := corpusConfig(t)
 	if mode != "replay" && os.Getenv(cfg.APIKeyEnv) == "" {
 		t.Fatalf("%s=%s needs %s set", modeEnv, mode, cfg.APIKeyEnv)
 	}
+	t.Logf("provider %s, model %s", cfg.Provider, cfg.Model)
 
 	for _, name := range caseNames(t) {
 		t.Run(name, func(t *testing.T) {
@@ -285,7 +318,10 @@ func TestCorpus(t *testing.T) {
 
 			provider, err := newProvider(cfg, mode, dir, name)
 			if err != nil {
-				t.Skipf("%v", err)
+				t.Fatalf("%v", err)
+			}
+			if mode == "replay" {
+				assertRecordingIsCurrent(t, dir, cfg.Provider, request)
 			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
@@ -315,28 +351,84 @@ func TestCorpus(t *testing.T) {
 	}
 }
 
-// newProvider builds the provider for one case in the given mode. In replay
-// mode a case with no recording is skipped, not failed — recordings
-// accumulate one paid run at a time.
+// recordingPath names one case's recording for one provider. Recordings are
+// per provider because each provider has to earn its place on the same seven
+// cases under its own recordings, and adding one must leave the Anthropic
+// baseline untouched.
+func recordingPath(dir, provider string) string {
+	return filepath.Join(dir, "recording."+provider+".json")
+}
+
+// newProvider builds the provider for one case in the given mode. Record and
+// replay wrap the live provider here rather than in engine.NewProvider: which
+// case is being recorded is the corpus's business.
+//
+// A missing recording in replay mode is an error, never a skip. ci.yml runs
+// replay as the finding-quality gate, and a skipped case makes a green run
+// that measured nothing — deleting every recording would have passed CI.
 func newProvider(cfg config.Config, mode, dir, name string) (llm.Provider, error) {
-	recording := filepath.Join(dir, "recording.json")
+	recording := recordingPath(dir, cfg.Provider)
 	if mode == "replay" {
 		if _, err := os.Stat(recording); err != nil {
-			return nil, fmt.Errorf("no recording for %s; run once with %s=record to create it", name, modeEnv)
+			return nil, fmt.Errorf("no %s recording for %s; run once with %s=record to create it",
+				cfg.Provider, name, modeEnv)
 		}
 		return fixture.NewPlayer(recording), nil
 	}
 
-	live := anthropic.New(anthropic.Options{
-		Model:     cfg.Model,
-		APIKey:    os.Getenv(cfg.APIKeyEnv),
-		Effort:    cfg.Effort,
-		MaxTokens: cfg.MaxTokens,
-	})
+	live, err := engine.NewProvider(cfg, os.Getenv(cfg.APIKeyEnv))
+	if err != nil {
+		return nil, err
+	}
 	if mode == "record" {
 		return fixture.NewRecorder(live, recording, "corpus/"+name), nil
 	}
 	return live, nil
+}
+
+// assertRecordingIsCurrent fails a replayed case whose recording was made
+// from a different request than the engine now assembles.
+//
+// The player reports a mismatch as a note, which the loop logs. That was
+// enough when a human was reading -v output and is not enough in CI, where
+// nobody reads a passing job's log: a replay asserting against a request the
+// engine no longer builds is the gate measuring something that stopped
+// existing, while reporting success.
+//
+// This is narrower than it sounds. The fingerprint covers ReviewRequest's
+// data sections and deliberately not its Prompt, so editing prompts/drift-ci.md
+// stales nothing. What trips it is a change to how the request is assembled —
+// internal/llm/sections.go, the line-number prefixes, deps.Render, context
+// selection — or to a case's own inputs. Each of those changes what the model
+// actually sees, so the old recording cannot speak to the new behaviour and
+// re-recording is the measurement rather than a chore.
+func assertRecordingIsCurrent(t *testing.T, dir, provider string, request llm.ReviewRequest) {
+	t.Helper()
+
+	raw, err := os.ReadFile(recordingPath(dir, provider))
+	if err != nil {
+		t.Fatalf("reading the recording: %v", err)
+	}
+	var recording fixture.Recording
+	if err := json.Unmarshal(raw, &recording); err != nil {
+		t.Fatalf("parsing the recording: %v", err)
+	}
+
+	if recording.RequestDigest == "" {
+		t.Fatalf("the recording carries no request fingerprint, so it cannot be checked against the assembled request; re-record with %s=record",
+			modeEnv)
+	}
+	if want := fixture.Digest(request); recording.RequestDigest != want {
+		t.Fatalf("the recording was made from a different request (%s) than the engine now assembles, so replaying it measures the old one; re-record with %s=record\n  recorded: %s\n  assembled: %s",
+			or(recording.Source, "source unrecorded"), modeEnv, recording.RequestDigest, want)
+	}
+}
+
+func or(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func assertExpectations(t *testing.T, expected expectation, report *findings.Report) {
