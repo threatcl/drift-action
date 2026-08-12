@@ -204,13 +204,13 @@ threatmodel "threatcl-drift-action" {
   }
 
   third_party_dependency "Anthropic API" {
-    description       = "Hosted LLM inference; receives the repository source excerpts and diff described by the 'repository source code' asset. The default provider, and the one every committed corpus recording was made against"
+    description       = "Hosted LLM inference; receives the repository source excerpts and diff described by the 'repository source code' asset. The default provider, and the baseline the Anthropic corpus recordings (testdata/corpus/*/recording.anthropic.json, claude-opus-5) were made against. Recordings are per provider, so this baseline is unaffected by adding another"
     saas              = true
     uptime_dependency = "hard"
   }
 
   third_party_dependency "OpenAI API" {
-    description       = "The alternative inference provider, selected by llm.provider in .threatcl-ci.hcl. It receives exactly the same repository source excerpts and diff as the Anthropic API when configured, so the disclosure boundary is identical and only the recipient changes — a repository choosing it is choosing which third party sees its code. Not reached at all unless configured, but a hard dependency for any repository that does"
+    description       = "The alternative inference provider, selected by llm.provider in .threatcl-ci.hcl. It receives exactly the same repository source excerpts and diff as the Anthropic API when configured, so the disclosure boundary is identical and only the recipient changes — a repository choosing it is choosing which third party sees its code. Not reached at all unless configured, but a hard dependency for any repository that does. It has earned that place rather than merely compiling: a parallel set of corpus recordings (testdata/corpus/*/recording.openai.json, gpt-5.6-sol) is committed for it, one per drift category plus the clean case, and all seven pass"
     saas              = true
     uptime_dependency = "hard"
   }
