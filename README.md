@@ -84,7 +84,8 @@ This repository's own drift workflow pins the SHA, for exactly that reason.
 | Input | Default | Description |
 |-------|---------|-------------|
 | `config-path` | `.threatcl-ci.hcl` | Path to the drift config file |
-| `anthropic-api-key` | — | LLM API key; without one, no drift category is assessed |
+| `anthropic-api-key` | — | Anthropic API key; without one, no drift category is assessed |
+| `openai-api-key` | — | OpenAI API key, when `llm.provider` is `openai` |
 | `github-token` | `${{ github.token }}` | Reads the PR diff, writes the comment/check |
 | `fail-mode` | from config | `never` \| `on-action-required` |
 | `model` | from config | Override the LLM model |
@@ -223,6 +224,28 @@ limits {
 An unknown category, fail mode, effort level or provider is a hard error
 rather than a silent default, so a typo can never quietly disable a drift
 check or fail the request after the diff has already been fetched.
+
+`model` and `api_key_env` follow from `provider` when you do not set them, so
+selecting a provider is usually all you need:
+
+```hcl
+llm {
+  provider = "openai"
+  model    = "…" # required: see below
+}
+```
+
+Pass the matching key with the `openai-api-key` input. Both key inputs are
+forwarded to the container, and the engine reads only the one its provider
+names — so switching provider is a config-file change, not a workflow change,
+as long as the key is wired up.
+
+`anthropic` defaults to `claude-opus-5`. `openai` has **no default model** and
+requires `llm.model`: forced-JSON support varies by model, and a default that
+had not been verified against this engine would fail the run after the diff
+had already been fetched. Setting `api_key_env` to something other than the
+two names above only works if your workflow puts that variable into the
+container itself.
 
 `max_tokens` bounds the model's output *including* its thinking. Too tight and
 the report is truncated mid-JSON, which the run reports as an error rather than

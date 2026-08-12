@@ -87,7 +87,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	cfg, err := loadConfig(prCtx.Workspace)
+	cfg, err := config.Load(prCtx.Workspace)
 	if err != nil {
 		return err
 	}
@@ -191,20 +191,6 @@ func run(ctx context.Context) error {
 		os.Exit(1)
 	}
 	return nil
-}
-
-// loadConfig layers the config file over the defaults, then the action inputs
-// over both — inputs are the highest-precedence layer.
-func loadConfig(workspace string) (config.Config, error) {
-	cfg, err := config.Default().FromEnv()
-	if err != nil {
-		return cfg, err
-	}
-	cfg, err = cfg.LoadFile(filepath.Join(workspace, cfg.ConfigPath))
-	if err != nil {
-		return cfg, err
-	}
-	return cfg.FromEnv()
 }
 
 func loadModel(workspace string, cfg config.Config) (*model.Assertions, error) {

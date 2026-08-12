@@ -78,7 +78,9 @@ func TestLoadFileRejectsBadValues(t *testing.T) {
 	}{
 		{"unknown category", `categories = ["phantom_controls"]`, "unknown drift category"},
 		{"bad fail mode", `fail_mode = "always"`, "fail_mode must be"},
-		{"unknown provider", `llm { provider = "openai" }`, "llm.provider must be"},
+		// vertex, not openai: openai is accepted now, and the point of this
+		// case is a provider the engine has no implementation for.
+		{"unknown provider", `llm { provider = "vertex" }`, "llm.provider must be"},
 		{"bad effort", `llm { effort = "extreme" }`, "llm.effort must be"},
 		{"malformed hcl", `fail_mode = `, "parsing"},
 		{"unknown attribute", `not_a_setting = true`, "decoding"},

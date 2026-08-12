@@ -204,6 +204,23 @@ way to be wrong.
   clean (`additionalProperties: false` and full `required` at every level);
   the one `const` needs rewriting as a single-value `enum`.
 
+  The config surface is in: `config.providerDefaults` is the single list of
+  known providers (`knownProvider` reads it), `openai` is accepted, and
+  `action.yml` forwards `OPENAI_API_KEY` alongside the Anthropic key. Model
+  and `api_key_env` are **derived from the provider**, re-derived when a
+  config file switches it — hence `config.Load`, which layers defaults, file
+  and inputs and then validates, and which is why `FromEnv` runs twice: only
+  a second input pass can put an explicit `model` input back above a
+  provider switch. `openai` deliberately has no default model, so selecting
+  it without `llm.model` is a config-time error rather than a run that dies
+  after fetching the diff.
+
+  Until the provider itself lands, `provider = "openai"` plus an explicit
+  model passes config validation and then fails in `engine.NewProvider` —
+  after the diff is fetched, which is the one thing config-time validation
+  exists to avoid. That window closes when `internal/llm/openai` exists;
+  do not ship a release inside it.
+
 ## Siblings
 
 - `../spec` — HCL parser. `spec.LoadSpecConfig()` →

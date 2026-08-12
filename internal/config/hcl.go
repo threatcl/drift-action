@@ -2,7 +2,11 @@ package config
 
 import (
 	"fmt"
+	"maps"
 	"os"
+	"slices"
+	"strconv"
+	"strings"
 
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
@@ -85,9 +89,14 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 	if fc.LLM != nil {
 		if fc.LLM.Provider != "" {
 			if !knownProvider(fc.LLM.Provider) {
-				return c, fmt.Errorf(
-					"%s: llm.provider must be \"anthropic\" (v0 supports anthropic only), got %q",
-					path, fc.LLM.Provider)
+				return c, fmt.Errorf("%s: llm.provider must be %s, got %q",
+					path, knownProviders(), fc.LLM.Provider)
+			}
+			if fc.LLM.Provider != c.Provider {
+				// The model and key env currently in hand are the departing
+				// provider's. Re-derive before this same block's llm.model
+				// and llm.api_key_env get their chance to override.
+				c = c.withProviderDefaults(fc.LLM.Provider)
 			}
 			c.Provider = fc.LLM.Provider
 		}
@@ -127,14 +136,22 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 }
 
 // knownProvider fails a provider typo at config time, like every other enum
-// here — main's provider switch would otherwise catch it only at review time,
-// after the diff has already been fetched.
+// here — the engine's provider switch would otherwise catch it only at review
+// time, after the diff has already been fetched. It reads providerDefaults so
+// the accepted set cannot drift from the set that has defaults.
 func knownProvider(provider string) bool {
-	switch provider {
-	case "anthropic":
-		return true
+	_, ok := providerDefaults[provider]
+	return ok
+}
+
+// knownProviders renders the accepted providers for an error message, sorted
+// so the text is stable across runs.
+func knownProviders() string {
+	names := slices.Sorted(maps.Keys(providerDefaults))
+	for i, name := range names {
+		names[i] = strconv.Quote(name)
 	}
-	return false
+	return strings.Join(names, " or ")
 }
 
 // knownEffort keeps a typo from reaching the API as a 400 mid-run, after the

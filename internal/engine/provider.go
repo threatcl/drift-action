@@ -25,11 +25,13 @@ import (
 // wraps on env vars and the corpus wraps per case, and neither belongs in a
 // provider factory.
 //
-// An unknown provider is rejected at config time (config.knownProvider), so
-// reaching the default here means a caller built a Config by hand.
+// A provider name config does not know is rejected at config time
+// (config.knownProvider). What can still reach the default here is a name
+// config accepts but this build cannot serve, which is a narrower and
+// louder failure than a typo.
 func NewProvider(cfg config.Config, apiKey string) (llm.Provider, error) {
 	switch cfg.Provider {
-	case "anthropic", "":
+	case config.ProviderAnthropic, "":
 		return anthropic.New(anthropic.Options{
 			Model:     cfg.Model,
 			APIKey:    apiKey,
@@ -37,6 +39,8 @@ func NewProvider(cfg config.Config, apiKey string) (llm.Provider, error) {
 			MaxTokens: cfg.MaxTokens,
 		}), nil
 	default:
-		return nil, fmt.Errorf("unknown llm provider %q; v0 supports anthropic only", cfg.Provider)
+		return nil, fmt.Errorf(
+			"llm provider %q is configured, but this build has no implementation for it",
+			cfg.Provider)
 	}
 }
