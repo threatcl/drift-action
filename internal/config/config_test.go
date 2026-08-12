@@ -108,12 +108,29 @@ func TestProviderSwitchRederivesDefaults(t *testing.T) {
 	if cfg.APIKeyEnv != "OPENAI_API_KEY" {
 		t.Errorf("api_key_env = %q — the Anthropic default survived the switch", cfg.APIKeyEnv)
 	}
-	if cfg.Model != "" {
-		t.Errorf("model = %q, want empty: openai has no verified default model", cfg.Model)
+	if cfg.Model == "claude-opus-5" {
+		t.Error("the Anthropic default model survived the switch to openai")
 	}
-	// That empty model is refused before a diff is ever fetched.
-	if err := cfg.validate(); err == nil {
-		t.Error("a provider with no model must not validate")
+	if cfg.Model == "" {
+		t.Error("openai should carry its own verified default model")
+	}
+}
+
+// TestValidateRejectsProviderWithNoModel covers the provider added to
+// providerDefaults without a verified model. Both shipped providers now carry
+// one, so this exercises validate directly rather than through a real
+// provider — the guard has to keep working for the next one added.
+func TestValidateRejectsProviderWithNoModel(t *testing.T) {
+	cfg := Default()
+	cfg.Provider = "some-future-provider"
+	cfg.Model = ""
+
+	err := cfg.validate()
+	if err == nil {
+		t.Fatal("a provider with no model must not validate")
+	}
+	if !strings.Contains(err.Error(), "llm.model must be set") {
+		t.Errorf("error = %v, want it to name the missing setting", err)
 	}
 }
 
@@ -159,17 +176,18 @@ func TestLoadKeepsInputModelAboveProviderSwitch(t *testing.T) {
 	}
 }
 
-// TestLoadRejectsProviderWithNoModel checks the refusal end to end, through
-// the same entry point the action uses.
-func TestLoadRejectsProviderWithNoModel(t *testing.T) {
+// TestLoadSelectsOpenAIWithoutAModel: selecting a provider is now the whole
+// config change a repo needs, because both shipped providers carry a verified
+// default model.
+func TestLoadSelectsOpenAIWithoutAModel(t *testing.T) {
 	workspace := filepath.Dir(writeConfig(t, `llm { provider = "openai" }`))
 
-	_, err := Load(workspace)
-	if err == nil {
-		t.Fatal("expected an error: openai has no default model")
+	cfg, err := Load(workspace)
+	if err != nil {
+		t.Fatalf("selecting openai alone should be enough: %v", err)
 	}
-	if !strings.Contains(err.Error(), "llm.model must be set") {
-		t.Errorf("error = %v, want it to name the missing setting", err)
+	if cfg.Provider != ProviderOpenAI || cfg.Model == "" || cfg.APIKeyEnv != "OPENAI_API_KEY" {
+		t.Errorf("incomplete openai config: %q/%q/%q", cfg.Provider, cfg.Model, cfg.APIKeyEnv)
 	}
 }
 
@@ -182,5 +200,53 @@ func TestLoadWithoutConfigFile(t *testing.T) {
 	}
 	if cfg.Provider != ProviderAnthropic || cfg.Model == "" || cfg.APIKeyEnv == "" {
 		t.Errorf("incomplete default config: %q/%q/%q", cfg.Provider, cfg.Model, cfg.APIKeyEnv)
+	}
+}
+
+// TestLoadRejectsBadFailModeInput closes the gap between the two config
+// paths: LoadFile has always rejected an unknown fail_mode, but the action
+// input reached FailMode unchecked, so a typo silently degraded to "never"
+// and left the author believing their pull requests were gated.
+func TestLoadRejectsBadFailModeInput(t *testing.T) {
+	t.Setenv("INPUT_FAIL-MODE", "on-action-requried") // a plausible typo
+
+	_, err := Load(t.TempDir())
+	if err == nil {
+		t.Fatal("expected an error: a misspelled fail mode must not degrade to never")
+	}
+	if !strings.Contains(err.Error(), "fail_mode must be") {
+		t.Errorf("error = %v, want it to name the setting", err)
+	}
+}
+
+func TestLoadAcceptsBothFailModes(t *testing.T) {
+	for _, mode := range []string{FailNever, FailOnActionRequired} {
+		t.Run(mode, func(t *testing.T) {
+			t.Setenv("INPUT_FAIL-MODE", mode)
+			cfg, err := Load(t.TempDir())
+			if err != nil {
+				t.Fatalf("%q should be accepted: %v", mode, err)
+			}
+			if cfg.FailMode != mode {
+				t.Errorf("fail mode = %q, want %q", cfg.FailMode, mode)
+			}
+		})
+	}
+}
+
+// TestOpenAIDefaultModelIsVerified pins the default to the model the
+// committed OpenAI recordings were made against. Changing it without
+// re-recording would leave the corpus measuring a model the action no
+// longer uses.
+func TestOpenAIDefaultModelIsVerified(t *testing.T) {
+	cfg, err := Default().WithProvider(ProviderOpenAI)
+	if err != nil {
+		t.Fatalf("selecting openai: %v", err)
+	}
+	if cfg.Model != "gpt-5.6-sol" {
+		t.Errorf("openai default model = %q; if this changed deliberately, re-record the corpus", cfg.Model)
+	}
+	if err := cfg.validate(); err != nil {
+		t.Errorf("openai should now validate without an explicit model: %v", err)
 	}
 }

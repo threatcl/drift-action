@@ -27,7 +27,16 @@ THREATCL_DRIFT_CORPUS=replay go test ./internal/corpus -v
 A replayed case asserts what the engine produced when it was recorded — it
 exercises the harness, the schema, and the evidence rule for free, but says
 nothing about the current prompt. When a recording's fingerprint no longer
-matches the assembled request, the case logs it; re-record to re-measure.
+matches the assembled request, the case **fails**: replaying it would measure
+a request the engine no longer sends, and this suite is CI's only
+finding-quality gate. Re-record to re-measure.
+
+That fingerprint covers the request's data sections and deliberately not the
+prompt, so editing `prompts/drift-ci.md` stales nothing. What trips it is a
+change to how the request is assembled — `internal/llm/sections.go`, the
+line-number prefixes, `deps.Render`, context selection — or to a case's own
+inputs. Each of those changes what the model actually sees, so re-recording
+is the measurement rather than a chore.
 
 ### Running another provider
 

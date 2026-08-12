@@ -54,9 +54,8 @@ runs:
   # This line is written by .github/workflows/release.yml, not by hand. The
   # release publishes the image first and commits the digest it got back, so
   # every release names the engine it just built. Editing it in a release PR
-  # only conflicts with the commit the workflow pushes. It still reads as the
-  # v0.1.0 digest until the next release, because the v0.1.1 bootstrap had no
-  # image of its own to name — see docs/RELEASING.md.
+  # only conflicts with the commit the workflow pushes. On main between
+  # releases it names the most recent release's image — see docs/RELEASING.md.
   image: 'docker://ghcr.io/threatcl/drift-action@sha256:38f5fcc530eb1eb73b609ef7a69cc8ef7ddd096433e1af1fe6290207abc92251'
   env:
     # Both keys are forwarded unconditionally; the engine reads only the one

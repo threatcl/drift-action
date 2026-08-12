@@ -320,6 +320,9 @@ func TestCorpus(t *testing.T) {
 			if err != nil {
 				t.Fatalf("%v", err)
 			}
+			if mode == "replay" {
+				assertRecordingIsCurrent(t, dir, cfg.Provider, request)
+			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer cancel()
@@ -381,6 +384,51 @@ func newProvider(cfg config.Config, mode, dir, name string) (llm.Provider, error
 		return fixture.NewRecorder(live, recording, "corpus/"+name), nil
 	}
 	return live, nil
+}
+
+// assertRecordingIsCurrent fails a replayed case whose recording was made
+// from a different request than the engine now assembles.
+//
+// The player reports a mismatch as a note, which the loop logs. That was
+// enough when a human was reading -v output and is not enough in CI, where
+// nobody reads a passing job's log: a replay asserting against a request the
+// engine no longer builds is the gate measuring something that stopped
+// existing, while reporting success.
+//
+// This is narrower than it sounds. The fingerprint covers ReviewRequest's
+// data sections and deliberately not its Prompt, so editing prompts/drift-ci.md
+// stales nothing. What trips it is a change to how the request is assembled —
+// internal/llm/sections.go, the line-number prefixes, deps.Render, context
+// selection — or to a case's own inputs. Each of those changes what the model
+// actually sees, so the old recording cannot speak to the new behaviour and
+// re-recording is the measurement rather than a chore.
+func assertRecordingIsCurrent(t *testing.T, dir, provider string, request llm.ReviewRequest) {
+	t.Helper()
+
+	raw, err := os.ReadFile(recordingPath(dir, provider))
+	if err != nil {
+		t.Fatalf("reading the recording: %v", err)
+	}
+	var recording fixture.Recording
+	if err := json.Unmarshal(raw, &recording); err != nil {
+		t.Fatalf("parsing the recording: %v", err)
+	}
+
+	if recording.RequestDigest == "" {
+		t.Fatalf("the recording carries no request fingerprint, so it cannot be checked against the assembled request; re-record with %s=record",
+			modeEnv)
+	}
+	if want := fixture.Digest(request); recording.RequestDigest != want {
+		t.Fatalf("the recording was made from a different request (%s) than the engine now assembles, so replaying it measures the old one; re-record with %s=record\n  recorded: %s\n  assembled: %s",
+			or(recording.Source, "source unrecorded"), modeEnv, recording.RequestDigest, want)
+	}
+}
+
+func or(value, fallback string) string {
+	if value != "" {
+		return value
+	}
+	return fallback
 }
 
 func assertExpectations(t *testing.T, expected expectation, report *findings.Report) {
