@@ -1,0 +1,46 @@
+{
+  "recorded_at": "2026-08-12T13:22:36Z",
+  "source": "corpus/dependency-drift",
+  "model": "gpt-5.6-sol",
+  "request_digest": "2026d998d09ced672fbafd6525315154774764028bf5110503161cbafbe872ac",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Found 1 review-recommended dependency drift issue: the new Redis-backed session store is not represented in app.tm.hcl.",
+    "findings": [
+      {
+        "category": "dependency_drift",
+        "severity": "review_recommended",
+        "title": "Redis session store is absent from third-party dependency assertions",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 23,
+          "quote": "third_party_dependency \"identity provider\""
+        },
+        "evidence": [
+          {
+            "file": "go.mod",
+            "line": 6,
+            "note": "Adds the previously unmodeled github.com/redis/go-redis/v9 dependency."
+          },
+          {
+            "file": "internal/session/cache.go",
+            "line": 17,
+            "note": "Creates a client connection to an external Redis instance."
+          },
+          {
+            "file": "internal/session/cache.go",
+            "line": 22,
+            "note": "Stores session tokens and user IDs in Redis with a 24-hour TTL."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "Strongly relevant because Redis is both a new third-party dependency and the external store for the model's Restricted session-token asset, but only the identity provider is currently modeled."
+        },
+        "agent_prompt": "Update app.tm.hcl in threat model \"login service\" by adding a `third_party_dependency \"Redis\"` block with an appropriate `uptime_dependency` value and a description stating that Redis is the shared store for restricted session tokens and user IDs with a 24-hour TTL. This is required because go.mod adds github.com/redis/go-redis/v9 at go.mod:6, internal/session/cache.go creates a Redis client at line 17, and stores session-token-to-user-ID mappings at line 22; the model currently lists only the identity provider at app.tm.hcl:23.",
+        "suggested_fix": "Add a Redis third-party dependency block describing its use as the shared session-token store and its uptime dependency."
+      }
+    ]
+  }
+}

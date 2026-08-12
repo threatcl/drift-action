@@ -1,0 +1,46 @@
+{
+  "recorded_at": "2026-08-12T13:23:14Z",
+  "source": "corpus/stale-assertion",
+  "model": "gpt-5.6-sol",
+  "request_digest": "0f187945b18a0ec8a32e64688caa0028d5d669f0f98fb4d154b3e701e71826c6",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "One action-required stale assertion: the threat model still claims bcrypt at cost 12, while password hashing now uses Argon2id.",
+    "findings": [
+      {
+        "category": "stale_assertion",
+        "severity": "action_required",
+        "title": "Password-hashing assertion still claims bcrypt after migration to Argon2id",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 12,
+          "quote": "An attacker who obtains the users table cracks password hashes offline. Passwords are hashed with bcrypt at cost 12 in internal/auth/password.go, which keeps offline cracking expensive."
+        },
+        "evidence": [
+          {
+            "file": "internal/auth/password.go",
+            "line": 9,
+            "note": "The password implementation now imports golang.org/x/crypto/argon2 rather than bcrypt."
+          },
+          {
+            "file": "internal/auth/password.go",
+            "line": 18,
+            "note": "HashPassword derives stored hashes with Argon2id using parameters 1, 64*1024 KiB, 4 threads, and a 32-byte output."
+          },
+          {
+            "file": "internal/auth/password.go",
+            "line": 37,
+            "note": "VerifyPassword also derives the candidate hash with Argon2id, confirming bcrypt verification is no longer used."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The changed implementation directly contradicts the model's specific claim that password.go uses bcrypt at cost 12."
+        },
+        "agent_prompt": "Update app.tm.hcl, threat \"credential database theft\" at line 12: replace the claim that internal/auth/password.go uses bcrypt at cost 12 with an accurate description of the new Argon2id implementation and its parameters (1 iteration, 64 MiB memory, 4 threads, 32-byte key, and a random 16-byte salt). The implementation changed to argon2.IDKey at internal/auth/password.go:18 and :37. Keep control \"password hashing\" implemented=true because server-side password hashing remains present.",
+        "suggested_fix": "Revise the credential-database-theft threat description to document Argon2id and its current salt and work-factor parameters instead of bcrypt cost 12."
+      }
+    ]
+  }
+}
