@@ -24,7 +24,7 @@ type Config struct {
 	// ConfigPath is the repo-relative path to the .threatcl-ci.hcl file.
 	ConfigPath string
 	// ModelPaths are the threat model files to assess. Empty means discover
-	// (*.tm.hcl at repo root, then threatmodels/).
+	// (*.tm.hcl at repo root, then threatmodels/ and threatmodel/).
 	ModelPaths []string
 	// Categories are the enabled drift categories. Empty means all six.
 	Categories []string

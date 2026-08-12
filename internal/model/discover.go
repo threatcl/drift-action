@@ -12,8 +12,14 @@ import (
 var ErrNoModel = errors.New("no threat model found")
 
 // discoveryGlobs are searched in order: repo root first, then the conventional
-// threatmodels/ directory.
-var discoveryGlobs = []string{"*.tm.hcl", "threatmodels/*.hcl", "threatmodels/*.tm.hcl"}
+// threatmodels/ directory. Both spellings of that directory are searched — the
+// org's own ENISA worked example (a template repo, so its layout propagates)
+// keeps its model under the singular threatmodel/.
+var discoveryGlobs = []string{
+	"*.tm.hcl",
+	"threatmodels/*.hcl", "threatmodels/*.tm.hcl",
+	"threatmodel/*.hcl", "threatmodel/*.tm.hcl",
+}
 
 // Discover finds candidate threat model files under root. It deliberately does
 // not glob bare *.hcl at the repo root — that would sweep up .threatcl-ci.hcl
