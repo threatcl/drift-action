@@ -44,9 +44,11 @@ jobs:
     # 'release tags are immutable' ruleset restricts to repository admins. The
     # workflow creates that tag now, so the ruleset no longer gates who starts
     # a release — anyone who can dispatch a workflow could. Required reviewers
-    # on this environment are what replaces that gate. An environment with no
-    # protection rules is inert, so this line does nothing until the rules are
-    # configured; see docs/RELEASING.md.
+    # on this environment are what replaces that gate, and they are configured:
+    # verified 2026-08-12, the release environment carries a required_reviewers
+    # rule. An environment with no protection rules is inert, so if that rule
+    # is ever removed this line silently stops gating anything and the trigger
+    # is wide open. See docs/RELEASING.md.
     environment: release
     outputs:
       digest: ${{ steps.build.outputs.digest }}

@@ -355,6 +355,32 @@ threatmodel "threatcl-drift-action" {
       to   = "GitHub API"
     }
 
+    # publish-image, before it publishes anything: git ls-remote --exit-code
+    # origin refs/tags/$VERSION in the 'Refuse to re-release an existing
+    # version' step, over the same checkout of main the image is built from.
+    # Drawn because the publish-before-tag ordering leans on it — publishing
+    # is the irreversible half, so the guard that a version has not already
+    # been released has to read the ref namespace before the push rather than
+    # after it. Distinct from the ancestry read in tag-release, which happens
+    # after the image exists.
+    flow "release tag existence check" {
+      from = "GitHub API"
+      to   = "Release publisher"
+    }
+
+    # The registry half of the same guard: docker buildx imagetools inspect
+    # ghcr.io/<repo>:$VERSION in the 'Refuse to repoint a published image tag'
+    # step. The git check above cannot see this case — a run that published
+    # and then failed before tagging leaves an image tag with no git tag to
+    # match — so without this read, re-dispatching that version would repoint
+    # a published :vX.Y.Z at a different manifest, which is the exact move
+    # this threat is about. The only edge on which the registry is read by
+    # anything other than a consumer's runner.
+    flow "published tag existence check" {
+      from = "GitHub Container Registry"
+      to   = "Release publisher"
+    }
+
     # publish-image: build the container from main's tip and push it to ghcr
     # with a packages: write token. Retargeted from "GitHub API" onto the
     # registry element now that one exists — this is the write side of the
