@@ -91,7 +91,7 @@ threatmodel "threatcl-drift-action" {
     control "Release dispatch gated by environment reviewers" {
       description          = "The publish-image job in .github/workflows/release.yml names a 'release' deployment environment carrying a required-reviewer rule, so a release run waits for approval before anything is published or tagged. This is what covers who starts a release now that the workflow creates the version tag itself and the admin-only tag ruleset no longer gates it — the sibling controls guard where a ref can land, not who triggers the run"
       implemented          = true
-      implementation_notes = "Configured and verified 2026-08-12: repos/threatcl/drift-action/environments/release returns one protection rule, required_reviewers, with xntrik as the sole reviewer. It replaces like for like — a write-holder who is not that reviewer can dispatch the workflow but cannot make it publish, which is the same population the admin-only tag ruleset used to exclude. Two settings are permissive by choice, both matching what they replace rather than widening it: prevent_self_review is false, because with one maintainer requiring a second approver would make releases impossible, so for that maintainer the gate is a confirmation step rather than separation of duties; and can_admins_bypass is true, which is exactly the admin bypass the version-tag ruleset already granted. The residual worth knowing is deployment_branch_policy, currently null. The dispatch ref decides which copy of .github/workflows/release.yml runs, so a write-holder can push a branch carrying a modified workflow and dispatch from it, and the approval prompt does not show the reviewer which revision they are approving. Restricting the environment to main would close that, and is the one hardening this control is missing"
+      implementation_notes = "Configured and verified 2026-08-12: repos/threatcl/drift-action/environments/release returns one protection rule, required_reviewers, with xntrik as the sole reviewer. It replaces like for like — a write-holder who is not that reviewer can dispatch the workflow but cannot make it publish, which is the same population the admin-only tag ruleset used to exclude. Two settings are permissive by choice, both matching what they replace rather than widening it: prevent_self_review is false, because with one maintainer requiring a second approver would make releases impossible, so for that maintainer the gate is a confirmation step rather than separation of duties; and can_admins_bypass is true, which is exactly the admin bypass the version-tag ruleset already granted. The residual worth knowing is deployment_branch_policy, currently null. The dispatch ref decides which copy of .github/workflows/release.yml runs, so a write-holder can push a branch carrying a modified workflow and dispatch from it, and the approval prompt does not show the reviewer which revision they are approving. Restricting the environment to main would close that, and is the one hardening this control is missing. The path this control guards is drawn in the 'review pipeline' diagram as the 'release dispatch' and 'release approval' flows, from the Release Operator element in the 'Repository maintainers' zone — the human the workflow_dispatch rewrite put in the diagram, where a v*.*.* tag push used to be"
       risk_reduction       = 40
     }
 
@@ -241,6 +241,20 @@ threatmodel "threatcl-drift-action" {
       }
     }
 
+    # People with write access to this repository. A zone of its own rather
+    # than a corner of "PR-author controlled", because the distinction is the
+    # whole subject of the release threats above: a PR author supplies content
+    # to a job that reviews it, while a maintainer starts the job that
+    # publishes the engine and moves the refs consumers resolve. The rewrite
+    # to workflow_dispatch is what put a human on this side of the line — the
+    # release used to begin with a v*.*.* tag push, admin-restricted by
+    # ruleset, and now begins with a dispatch that any write-holder can make.
+    trust_zone "Repository maintainers" {
+      external_element "Release Operator" {
+        trust_zone = "Repository maintainers"
+      }
+    }
+
     # Jobs in this repo's workflows that hold a credential. Two of them, on
     # different triggers with different grants: the review job holds
     # secrets.ANTHROPIC_API_KEY and a pull-requests/checks write-scoped
@@ -353,6 +367,36 @@ threatmodel "threatcl-drift-action" {
     flow "sticky comment and check run" {
       from = "Drift Review Engine"
       to   = "GitHub API"
+    }
+
+    # What now starts a release. Actions → release → Run workflow, carrying
+    # the version input the whole run is stamped with: the image tag, the OCI
+    # image.version label, the VERSION build-arg the binary reports as
+    # main.version, and the git tag. The ref it is dispatched from does not
+    # decide what gets built — publish-image checks out main and builds its
+    # tip — but it does decide which copy of .github/workflows/release.yml
+    # runs, so a write-holder can dispatch a modified workflow from a branch.
+    # Restricting the release environment's deployment branches to main is
+    # what would close that; it is unset, and the "Release dispatch gated by
+    # environment reviewers" control records it as the residual.
+    flow "release dispatch" {
+      from = "Release Operator"
+      to   = "Release publisher"
+    }
+
+    # The second half of the same control: the release environment named by
+    # publish-image carries a required_reviewers rule, so the dispatched run
+    # holds before its first step until a reviewer releases it. Mediated by
+    # GitHub rather than sent operator-to-runner, and drawn as its own edge
+    # because it is a distinct decision by a distinct person — except that
+    # prevent_self_review is false, so today the dispatcher may be that
+    # person. For a maintainer who is not the reviewer this is the gate that
+    # replaced the admin-only tag ruleset; for the reviewer themselves it is a
+    # confirmation step. Nothing crosses here but an approval, and nothing is
+    # published or tagged until it does.
+    flow "release approval" {
+      from = "Release Operator"
+      to   = "Release publisher"
     }
 
     # publish-image, before it publishes anything: git ls-remote --exit-code
