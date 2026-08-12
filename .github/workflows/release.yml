@@ -1,15 +1,28 @@
 name: release
 
+# Publish before tag. What action.yml names is a digest, and a digest cannot
+# be written for an image that does not exist yet — so the image has to be
+# built and pushed before the ref that names it is created. The order is:
+# build and push, read back the digest, commit it into action.yml on main,
+# then tag that commit and move the v0 alias onto it.
+#
+# That inverts the old flow, where a human pushed vX.Y.Z and the workflow built
+# from it. It could only ever pin :vX.Y.Z — a mutable registry pointer anyone
+# with packages: write can repoint silently — so every release after the v0.1.1
+# bootstrap would have shipped a weaker pin than v0.1.1 did.
+#
+# A release is therefore dispatched, not tagged. There is deliberately no tag
+# trigger: pushing vX.Y.Z by hand publishes nothing. That also closes for good
+# the loop where major-alias's own push re-triggered this workflow and left a
+# mutable :v0 image tag and a mis-stamped :latest behind — nothing here fires
+# on a ref any more, so the loop has no edge to run round.
 on:
-  push:
-    tags:
-      # Full version tags only. 'v*' would also match the v0 alias that
-      # major-alias force-pushes at the end of this very workflow, so every
-      # release re-triggered itself: a redundant rebuild, a mutable :v0 image
-      # tag on ghcr, and a failed run each time, since the second pass tripped
-      # the tag-shape guard below. This is also the shape the 'release tags are
-      # immutable' ruleset protects.
-      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release, e.g. v0.1.2'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -19,7 +32,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  release-image:
+  publish-image:
     permissions:
       # Job-level permissions replace the workflow-level block rather than
       # extending it, so contents has to be repeated here — without it the
@@ -27,8 +40,56 @@ jobs:
       contents: read
       packages: write
     runs-on: ubuntu-latest
+    # Cutting a release used to require pushing a vX.Y.Z tag, which the
+    # 'release tags are immutable' ruleset restricts to repository admins. The
+    # workflow creates that tag now, so the ruleset no longer gates who starts
+    # a release — anyone who can dispatch a workflow could. Required reviewers
+    # on this environment are what replaces that gate. An environment with no
+    # protection rules is inert, so this line does nothing until the rules are
+    # configured; see docs/RELEASING.md.
+    environment: release
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+      source-sha: ${{ steps.source.outputs.sha }}
     steps:
+      # Interpolating an input straight into a run block would evaluate it as
+      # shell. Every step that touches the version reads it from the
+      # environment instead, and this one settles its shape before anything is
+      # published.
+      - name: Validate the version input
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not a vX.Y.Z version"
+            exit 1
+          fi
+
+      # A release is always cut from main's tip. The dispatch ref decides which
+      # copy of this workflow runs, not what gets built.
       - uses: actions/checkout@v7
+        with:
+          ref: main
+
+      # Before the image is pushed, not after: publishing is the irreversible
+      # half, and re-releasing a version that already exists would repoint a
+      # published image tag at a different manifest.
+      - name: Refuse to re-release an existing version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code origin "refs/tags/$VERSION" >/dev/null 2>&1; then
+            echo "::error::$VERSION already exists; refusing to release it again"
+            exit 1
+          fi
+
+      # The commit the image is built from. The tagged commit is this one plus
+      # the digest line, so tag-release checks main has not moved underneath.
+      - name: Record the commit being released
+        id: source
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v4
 
@@ -39,36 +100,81 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # The git-tag check above does not cover this: a run that published and
+      # then failed before tagging leaves an image tag with no tag to match.
+      # Re-dispatching the same version would then repoint a published
+      # :vX.Y.Z at a different manifest — the exact mutable-pointer move this
+      # workflow exists to avoid. Delete the image tag first; that is the
+      # recovery docs/RELEASING.md documents.
+      - name: Refuse to repoint a published image tag
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}:${VERSION}" >/dev/null 2>&1; then
+            echo "::error::${REGISTRY}/${IMAGE_NAME}:${VERSION} is already published; refusing to repoint it"
+            exit 1
+          fi
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # The release version, named explicitly. On a workflow_dispatch the
+          # default derivation would tag the image after the dispatch branch.
+          tags: |
+            type=raw,value=${{ inputs.version }}
+          # No :latest. Nothing references it — not action.yml, not
+          # docs/RELEASING.md, not any documented consumer path — so it is a
+          # mutable pointer this repository publishes and nothing it ships
+          # relies on. It was also wrong for the whole life of the tag: the
+          # self-retriggered run moved :latest onto a build stamped v0 rather
+          # than onto the v0.1.1 release image.
           flavor: |
-            latest=true
+            latest=false
+          # Same reason as the tag above: image.version would otherwise come
+          # from the dispatch ref. Stamped so it matches the git tag and the
+          # main.version the binary logs.
+          labels: |
+            org.opencontainers.image.version=${{ inputs.version }}
 
       - name: Build docker image and push
+        id: build
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
           build-args: |
-            VERSION=${{ github.ref_name }}
+            VERSION=${{ inputs.version }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-  major-alias:
-    # Consumers write `uses: threatcl/drift-action@v0`, which resolves through
-    # this tag — so it has to follow every release, and it must never point at
-    # a release whose image failed to publish. Hence `needs`.
-    needs: release-image
+  tag-release:
+    # The image exists by the time this runs, which is the whole point of the
+    # ordering: the digest below names something already published, and no ref
+    # a consumer can resolve is created until it does.
+    needs: publish-image
     permissions:
-      # Read, deliberately: the ruleset guarding refs/tags/v0 lets only the
-      # release app move the alias (GitHub refuses to put the Actions
-      # identity itself on a bypass list), so the push below authenticates
-      # with a token minted from that app — GITHUB_TOKEN needs no write.
+      # Read, deliberately: the rulesets guarding refs/tags let only the
+      # release app create version tags and move the alias (GitHub refuses to
+      # put the Actions identity itself on a bypass list), so every push below
+      # authenticates with a token minted from that app — GITHUB_TOKEN needs
+      # no write.
       contents: read
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      DIGEST: ${{ needs.publish-image.outputs.digest }}
+      IMAGE: ghcr.io/${{ github.repository }}
+      # Set here rather than with git config in the commit step: an annotated
+      # tag records a tagger too, and the commit step returns early when the
+      # digest is unchanged — which would leave the tag step with no identity
+      # and fail the release after the image was published.
+      GIT_AUTHOR_NAME: drift-action release
+      GIT_AUTHOR_EMAIL: drift-action-release@users.noreply.github.com
+      GIT_COMMITTER_NAME: drift-action release
+      GIT_COMMITTER_EMAIL: drift-action-release@users.noreply.github.com
     steps:
       - name: Mint a release-app token
         id: app-token
@@ -79,31 +185,112 @@ jobs:
 
       - uses: actions/checkout@v7
         with:
-          # The ancestry check below needs main's history, not just the
-          # tagged commit. If someone later trims this back to a shallow
-          # fetch, origin/main stops resolving and the check fails closed.
+          ref: main
+          # The ancestry check below needs main's history, not just its tip.
+          # If someone later trims this back to a shallow fetch, origin/main
+          # stops resolving and the check fails closed.
           fetch-depth: 0
           # Persist the app token as the push credential, not GITHUB_TOKEN.
           token: ${{ steps.app-token.outputs.token }}
 
+      - name: Refuse if main moved under the build
+        env:
+          BUILT_SHA: ${{ needs.publish-image.outputs.source-sha }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          if [ "$head" != "$BUILT_SHA" ]; then
+            echo "::error::main is at $head but the image was built from $BUILT_SHA; refusing to release a commit the image was not built from"
+            exit 1
+          fi
+
+      - name: Pin the published digest into action.yml
+        run: |
+          set -euo pipefail
+          # A missing digest must never become the string 'action.yml names
+          # nothing' — fail before the file is touched.
+          case "$DIGEST" in
+            sha256:*) ;;
+            *) echo "::error::the build produced no digest"; exit 1 ;;
+          esac
+          matches="$(grep -c "^  image: " action.yml || true)"
+          if [ "$matches" != "1" ]; then
+            echo "::error::expected exactly one image: line in action.yml, found $matches"
+            exit 1
+          fi
+          sed -i "s|^  image: .*|  image: 'docker://${IMAGE}@${DIGEST}'|" action.yml
+          # Read it back rather than trusting sed's exit status, which is 0
+          # whether or not anything matched.
+          grep -qF "image: 'docker://${IMAGE}@${DIGEST}'" action.yml || {
+            echo "::error::action.yml does not name the published digest after the rewrite"
+            exit 1
+          }
+
+      - name: Commit the pin to main
+        run: |
+          set -euo pipefail
+          # An unchanged file is not a failure: a rebuild of an identical tree
+          # can land on the digest action.yml already names. The tag still has
+          # to be cut, so carry on rather than stopping the release.
+          if git diff --quiet -- action.yml; then
+            echo "action.yml already names $DIGEST; nothing to commit"
+            exit 0
+          fi
+          git add action.yml
+          git commit -m "release: pin $VERSION engine image by digest" \
+                     -m "$IMAGE@$DIGEST"
+          # Not forced. If main advanced between the checkout and here, this
+          # fails and the release stops with an unreferenced image, which is
+          # the recoverable half — see docs/RELEASING.md.
+          git push origin HEAD:refs/heads/main
+
+      # Before either tag is created, not between them: both are refs a
+      # consumer resolves, and neither should name a commit main does not
+      # carry. Under the old tag-triggered flow this caught a tag push that
+      # carried its own commit; here the job pushed that commit itself, so
+      # what it still does is fail closed if the push above did not land.
+      - name: Refuse to tag a commit that is not on main
+        run: |
+          set -euo pipefail
+          # Explicit refspec: a bare `git fetch origin main` only moves
+          # FETCH_HEAD if the remote-tracking refspec is not configured,
+          # leaving origin/main stale and failing this check on a release
+          # that is perfectly fine.
+          git fetch origin "+refs/heads/main:refs/remotes/origin/main"
+          if ! git merge-base --is-ancestor HEAD origin/main; then
+            echo "::error::$(git rev-parse HEAD) is not reachable from main; refusing to tag it"
+            exit 1
+          fi
+
+      - name: Create the release tag
+        run: |
+          set -euo pipefail
+          # Re-validated here rather than inherited: this job creates refs
+          # consumers resolve, and it must not depend on another job having
+          # checked their shape.
+          if ! printf '%s' "$VERSION" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::'$VERSION' is not a vX.Y.Z version"
+            exit 1
+          fi
+          git tag -a "$VERSION" -m "$VERSION" HEAD
+          # Not forced: the 'release tags are immutable' ruleset would refuse
+          # an update anyway, and this fails on an existing tag rather than
+          # racing it.
+          git push origin "refs/tags/$VERSION"
+
       - name: Move the major alias to this release
         run: |
           set -euo pipefail
-          # Backstop, not the primary defence: the trigger above no longer
-          # matches an alias tag. This still refuses to run if that filter is
-          # ever loosened, which is what stops a release from re-triggering
-          # itself in a loop.
-          major="${GITHUB_REF_NAME%%.*}"
-          if [ "$major" = "$GITHUB_REF_NAME" ]; then
-            echo "::error::$GITHUB_REF_NAME is not a vX.Y.Z tag; refusing to move an alias"
+          # Backstop, not the primary defence: nothing triggers this workflow
+          # from a ref any more, so the alias push cannot re-enter it. This
+          # still refuses to move an alias onto an alias if the version check
+          # above is ever loosened.
+          major="${VERSION%%.*}"
+          if [ "$major" = "$VERSION" ]; then
+            echo "::error::$VERSION is not a vX.Y.Z tag; refusing to move an alias"
             exit 1
           fi
-          # A tag push can carry its own commit, so the tagged SHA is not
-          # guaranteed to have appeared in any pull request. Never point the
-          # alias consumers resolve at code that has not landed on main.
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
-            echo "::error::$GITHUB_SHA is not reachable from main; refusing to move $major onto it"
-            exit 1
-          fi
-          git tag -f "$major" "$GITHUB_SHA"
+          # Reachability from main was settled by the step above, and nothing
+          # between it and here moves HEAD.
+          git tag -f "$major" HEAD
           git push origin -f "refs/tags/$major"

@@ -154,18 +154,25 @@ came back `no_drift` with a `success` check run — the conclusion reserved for
 a run that actually assessed and found consistency. Milestone 3 is therefore
 done except for the release itself.
 
-Release mechanics are staged but **not yet cut** — no tag exists. `ci.yml`
-runs the corpus replay, `release.yml` publishes the ghcr image on `v*.*.*` and
-moves the `v0` alias consumers pin, and `docs/RELEASING.md` holds the
-procedure. The first release is a deliberate two-tag bootstrap (v0.1.0
-publishes an image while `action.yml` still says `Dockerfile`; v0.1.1 flips
-to `docker://` and pins the dogfood workflow) — read RELEASING.md before
-tagging, the ordering is load-bearing.
+v0.1.0 and v0.1.1 are released. The two-tag bootstrap went as planned: v0.1.0
+published an image while `action.yml` still said `Dockerfile`, v0.1.1 flipped
+to `docker://` — pinning v0.1.0's image *by digest* — and moved the dogfood
+workflow onto a released SHA.
+
+**A release is now a `workflow_dispatch`, not a tag push.** `release.yml`
+publishes the image first, reads back its digest, commits that digest into
+`action.yml` on `main`, then tags that commit and moves `v0`. Pushing a tag by
+hand publishes nothing. The inversion exists because a digest can only name an
+image that already exists, so the old tag-first order could pin only
+`:vX.Y.Z` — a mutable registry pointer — and every release after v0.1.1 would
+have shipped a weaker pin than v0.1.1 did. `docs/RELEASING.md` holds the
+procedure and the partial-failure recovery table; read it before dispatching,
+the ordering is load-bearing. The registry gets exactly one tag per release
+and no `:latest`: a floating pointer no documented path references is only a
+way to be wrong.
 
 ## Open items
 
-- `threatcl/spec` has no LICENSE file. It is a direct dependency, so resolve
-  that before this repo is made public.
 - Config file name `.threatcl-ci.hcl` is settled; the claude-plugin's
   `/threat-ci` scaffolder still needs updating to emit it (and the workflow
   with the `concurrency:` block and a pinned release). The threatcl editor

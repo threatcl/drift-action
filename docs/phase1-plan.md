@@ -6,7 +6,7 @@ validated two ways: a seven-case corpus under `testdata/corpus/` (one per
 category plus a clean case that must stay clean), and live dogfooding on this
 repo's own pull requests — where the action found real gaps in its own threat
 model, the agent-prompt handoff fixed them, and the re-review came back clean.
-What is left is cutting the release; see `RELEASING.md`.
+v0.1.0 and v0.1.1 are released; see `RELEASING.md` for how later ones are cut.
 
 ## What this is
 

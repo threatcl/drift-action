@@ -44,12 +44,15 @@ runs:
   # the container on every run.
   #
   # Pinned by digest rather than by tag: a ghcr tag is a mutable pointer that
-  # anyone with packages: write can repoint silently. This is the v0.1.0 image
-  # — legitimate here because this release changes no engine code, so the
-  # binary is identical; the threat model and config are read from the
-  # workspace at runtime. Steady-state releases cannot do this (the image does
-  # not exist yet when the commit is tagged) and pin the version tag instead.
-  # See docs/RELEASING.md.
+  # anyone with packages: write can repoint silently, while a digest names one
+  # immutable manifest the runner will accept nothing else for.
+  #
+  # This line is written by .github/workflows/release.yml, not by hand. The
+  # release publishes the image first and commits the digest it got back, so
+  # every release names the engine it just built. Editing it in a release PR
+  # only conflicts with the commit the workflow pushes. It still reads as the
+  # v0.1.0 digest until the next release, because the v0.1.1 bootstrap had no
+  # image of its own to name — see docs/RELEASING.md.
   image: 'docker://ghcr.io/threatcl/drift-action@sha256:0f1807a196188ba76f8cd835c3f9cced7d85b23fe7dc0d51d2edcae1589bbc8b'
   env:
     ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
