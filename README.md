@@ -186,7 +186,8 @@ threat model in the repo); `error` means the action itself failed.
 
 The long tail lives in a repo-level `.threatcl-ci.hcl`. Every setting is
 optional — without the file, the action discovers a single `*.tm.hcl` at the
-repo root or under `threatmodels/` and uses the defaults below.
+repo root, or a single `*.hcl` under `threatmodels/` or `threatmodel/`, and
+uses the defaults below.
 
 ```hcl
 # Which model to assess. Required only when the repo has more than one.
