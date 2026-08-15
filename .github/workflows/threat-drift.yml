@@ -34,6 +34,6 @@ jobs:
       # spent 81s per run compiling before the review could start. The pin
       # necessarily trails by one release: the SHA of the release being cut
       # does not exist while it is being cut.
-      - uses: threatcl/drift-action@26ad20c346058f85283822a4043f60e5ff59a6c2 # v0.1.1
+      - uses: threatcl/drift-action@ca722d44fc637e68638c22dcfa8c42679d8ae931 # v1.0.0
         with:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
