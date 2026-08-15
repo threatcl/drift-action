@@ -20,7 +20,7 @@ jobs:
     steps:
       # The checkout stays: the diff comes from the compare API, but context
       # stuffing reads whole files out of the workspace.
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # Pinned to an immutable commit rather than the major alias. This job holds the
       # Anthropic key and a write-scoped token, and the major alias is
