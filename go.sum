@@ -185,8 +185,8 @@ github.com/tetratelabs/wazero v1.10.1 h1:2DugeJf6VVk58KTPszlNfeeN8AhhpwcZqkJj2ww
 github.com/tetratelabs/wazero v1.10.1/go.mod h1:DRm5twOQ5Gr1AoEdSi0CLjDQF1J9ZAuyqFIjl1KKfQU=
 github.com/threatcl/go-otm v0.0.2 h1:zN/Wwiy6QVw0SRm+YiZA7lDf2yI0jVyxPmNW1k9kgpw=
 github.com/threatcl/go-otm v0.0.2/go.mod h1:U1CNSpdQQ8S0lqr5LNn3tFZxsLgBKOz27+5k+IzFho0=
-github.com/threatcl/spec v0.7.0 h1:7tFArA7HPR4WitLhpKO+boGU9mfJFEh7xrkNi/Lutw0=
-github.com/threatcl/spec v0.7.0/go.mod h1:1bknRLB6bznbfXkkOpht7KsbY/VwPwSqId76U5bGbbw=
+github.com/threatcl/spec v0.8.0 h1:veLS0NtHK4f0v/rgMEOd2866wLKiunQEVAqEnM+/pvE=
+github.com/threatcl/spec v0.8.0/go.mod h1:gOIInH9AFNJgl8KWOygvdlvFOXS9vl0+Ir6DASX1FVY=
 github.com/tidwall/gjson v1.14.2/go.mod h1:/wbyibRr2FHMks5tjHJ5F8dMZh3AcwJEMf5vlfC0lxk=
 github.com/tidwall/gjson v1.19.0 h1:xwxm7n691Uf3u5OFjzngavjGTh55KX5q/9w9xHW88JU=
 github.com/tidwall/gjson v1.19.0/go.mod h1:V37/opeE/JbLUOfH0QTXiNez2l0RUjYUhpT4szFQAfc=
