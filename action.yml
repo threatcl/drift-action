@@ -56,7 +56,7 @@ runs:
   # every release names the engine it just built. Editing it in a release PR
   # only conflicts with the commit the workflow pushes. On main between
   # releases it names the most recent release's image — see docs/RELEASING.md.
-  image: 'docker://ghcr.io/threatcl/drift-action@sha256:fdcc4e32a52acb2fa97b6c9f7fd14268777735b6bfdad8f1017dd8a3d7b9fca7'
+  image: 'docker://ghcr.io/threatcl/drift-action@sha256:807325f055a36da36a62a2eb2b68312f0ec6c57c4fbb5cd0782df3e6163d5361'
   env:
     # Both keys are forwarded unconditionally; the engine reads only the one
     # its configured provider names in api_key_env, and an unset input arrives
