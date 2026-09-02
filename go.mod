@@ -3,7 +3,7 @@ module github.com/threatcl/drift-action
 go 1.26.6
 
 require (
-	github.com/anthropics/anthropic-sdk-go v1.63.0
+	github.com/anthropics/anthropic-sdk-go v1.66.0
 	github.com/google/go-github/v75 v75.0.0
 	github.com/hashicorp/hcl/v2 v2.24.0
 	github.com/openai/openai-go/v3 v3.52.0
