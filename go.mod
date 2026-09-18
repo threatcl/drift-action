@@ -6,7 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.71.0
 	github.com/google/go-github/v75 v75.0.0
 	github.com/hashicorp/hcl/v2 v2.24.0
-	github.com/openai/openai-go/v3 v3.55.0
+	github.com/openai/openai-go/v3 v3.58.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/threatcl/spec v0.8.1
 )
