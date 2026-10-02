@@ -8,8 +8,8 @@
 // a single recording, and it filtered without cfg.TriggerPaths. A corpus that
 // measures a different prompt than the action ships measures nothing.
 //
-// It sits above internal/llm rather than inside it: internal/llm/anthropic
-// imports internal/llm, so the provider constructors cannot live there.
+// It sits above internal/llm rather than inside it: the provider packages
+// import internal/llm, so the provider constructors cannot live there.
 package engine
 
 import (
@@ -18,6 +18,7 @@ import (
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/llm"
 	"github.com/threatcl/drift-action/internal/llm/anthropic"
+	"github.com/threatcl/drift-action/internal/llm/gemini"
 	"github.com/threatcl/drift-action/internal/llm/openai"
 )
 
@@ -46,6 +47,16 @@ func NewProvider(cfg config.Config, apiKey string) (llm.Provider, error) {
 			Effort:    cfg.Effort,
 			MaxTokens: cfg.MaxTokens,
 		}), nil
+	case config.ProviderGemini:
+		// The only constructor here that can fail: the SDK checks for a key
+		// up front. main has already refused an empty key by this point, so
+		// what this reports is a client that could not be built at all.
+		return gemini.New(gemini.Options{
+			Model:     cfg.Model,
+			APIKey:    apiKey,
+			Effort:    cfg.Effort,
+			MaxTokens: cfg.MaxTokens,
+		})
 	default:
 		return nil, fmt.Errorf(
 			"llm provider %q is configured, but this build has no implementation for it",

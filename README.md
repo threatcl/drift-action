@@ -89,6 +89,7 @@ This repository's own drift workflow pins the SHA, for exactly that reason.
 | `config-path` | `.threatcl-ci.hcl` | Path to the drift config file |
 | `anthropic-api-key` | — | Anthropic API key; without one, no drift category is assessed |
 | `openai-api-key` | — | OpenAI API key, when `llm.provider` is `openai` |
+| `gemini-api-key` | — | Gemini API key, when `llm.provider` is `gemini` |
 | `github-token` | `${{ github.token }}` | Reads the PR diff, writes the comment/check |
 | `fail-mode` | from config | `never` \| `on-action-required` |
 | `model` | from config | Override the LLM model |
@@ -237,19 +238,26 @@ llm {
 }
 ```
 
-Pass the matching key with the `openai-api-key` input. Both key inputs are
-forwarded to the container, and the engine reads only the one its provider
-names — so switching provider is a config-file change, not a workflow change,
-as long as the key is wired up.
+Pass the matching key with the `openai-api-key` or `gemini-api-key` input.
+Every key input is forwarded to the container, and the engine reads only the
+one its provider names — so switching provider is a config-file change, not a
+workflow change, as long as the key is wired up.
 
-`anthropic` defaults to `claude-opus-5`, `openai` to `gpt-5.6-sol`. Both are
-the models the committed finding-quality recordings were made against, on a
-corpus of one case per drift category plus a clean case that must stay clean.
+`anthropic` defaults to `claude-opus-5`, `openai` to `gpt-5.6-sol`, `gemini`
+to `gemini-3.8-flash`. All three are the models the committed finding-quality
+recordings were made against, on a corpus of one case per drift category plus
+a clean case that must stay clean, and all three agree on which cases are
+`action_required` — so `fail_mode` does not depend on which you pick.
 Overriding `model` is supported and sometimes right, but forced-JSON support
 varies by model, so an unverified one can fail the run after the diff has
-already been fetched. Setting `api_key_env` to something other than the two
+already been fetched. Setting `api_key_env` to something other than the
 names above only works if your workflow puts that variable into the container
 itself.
+
+`gemini` talks to the Gemini Developer API directly, by API key — not Vertex
+AI, and no GCP project is involved. The provider targets the Gemini 3 family:
+`effort` is sent as a thinking level, and `xhigh` and `max` collapse onto the
+API's `HIGH`, which is the highest it has.
 
 `max_tokens` bounds the model's output *including* its thinking. Too tight and
 the report is truncated mid-JSON, which the run reports as an error rather than

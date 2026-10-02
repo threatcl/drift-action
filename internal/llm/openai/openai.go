@@ -3,15 +3,15 @@
 //
 // It is the sibling of internal/llm/anthropic and deliberately mirrors its
 // shape. Four things genuinely differ, and each is commented where it lands:
-// strict mode constrains the schema, a refusal is signalled two different
-// ways rather than by a stop reason, reasoning effort is its own parameter,
-// and there is no server-side fallback — so ReviewResult.Fallback is never
-// set here, rather than being faked from something that only resembles one.
+// strict mode constrains the schema (llm.PortableSchema, shared with the
+// Gemini provider), a refusal is signalled two different ways rather than by
+// a stop reason, reasoning effort is its own parameter, and there is no
+// server-side fallback — so ReviewResult.Fallback is never set here, rather
+// than being faked from something that only resembles one.
 package openai
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -94,7 +94,10 @@ func (c *Client) Review(ctx context.Context, req llm.ReviewRequest) (*llm.Review
 	if len(raw) == 0 {
 		raw = findings.SchemaJSON
 	}
-	schema, err := strictSchema(raw)
+	// Strict mode accepts a subset of JSON Schema, and the shared schema's
+	// const is outside it. The translation is shared with the Gemini
+	// provider, whose accepted subset draws the same line.
+	schema, err := llm.PortableSchema(raw)
 	if err != nil {
 		return nil, err
 	}
@@ -215,76 +218,4 @@ func failureText(resp responses.Response) string {
 		return resp.Error.Message
 	}
 	return "the API reported no reason"
-}
-
-// strictSchema translates the shared findings schema into the subset strict
-// structured outputs accepts. The shared schema is left alone: it is the
-// validation source of truth and the Anthropic provider sends it verbatim, so
-// the translation belongs to the provider that needs it.
-//
-// The schema is already strict-shaped in every expensive way — every object
-// sets additionalProperties:false and lists all its properties as required —
-// so this is deliberately a narrow rewrite rather than a general converter. It
-// does two things, and anything else it silently passes through:
-//
-//   - const is not in the accepted subset, so a const becomes a single-value
-//     enum, which is exactly equivalent and is accepted.
-//   - a property given only a const carries no type, which strict mode
-//     requires, so the type is taken from the constant itself.
-//
-// $schema is dropped: it describes the schema's own dialect rather than the
-// instance, so it is meaningless to the API and only risks being rejected as
-// an unrecognised keyword.
-func strictSchema(raw []byte) (map[string]any, error) {
-	var root map[string]any
-	if err := json.Unmarshal(raw, &root); err != nil {
-		return nil, fmt.Errorf("the findings schema is not valid JSON: %w", err)
-	}
-	delete(root, "$schema")
-	return rewrite(root), nil
-}
-
-func rewrite(node map[string]any) map[string]any {
-	if value, ok := node["const"]; ok {
-		delete(node, "const")
-		node["enum"] = []any{value}
-		if _, typed := node["type"]; !typed {
-			if name := jsonTypeOf(value); name != "" {
-				node["type"] = name
-			}
-		}
-	}
-
-	for key, child := range node {
-		switch typed := child.(type) {
-		case map[string]any:
-			node[key] = rewrite(typed)
-		case []any:
-			for i, element := range typed {
-				if object, ok := element.(map[string]any); ok {
-					typed[i] = rewrite(object)
-				}
-			}
-		}
-	}
-	return node
-}
-
-// jsonTypeOf names the JSON type of a decoded constant. Numbers decode to
-// float64 whether or not they were written with a fraction, so an integer
-// const is reported as "number" — the wider of the two, and never wrong.
-func jsonTypeOf(value any) string {
-	switch value.(type) {
-	case string:
-		return "string"
-	case bool:
-		return "boolean"
-	case float64:
-		return "number"
-	case []any:
-		return "array"
-	case map[string]any:
-		return "object"
-	}
-	return ""
 }

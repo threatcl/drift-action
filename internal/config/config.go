@@ -23,6 +23,7 @@ const DefaultConfigPath = ".threatcl-ci.hcl"
 const (
 	ProviderAnthropic = "anthropic"
 	ProviderOpenAI    = "openai"
+	ProviderGemini    = "gemini"
 )
 
 // providerDefault holds the settings that follow from which provider is
@@ -49,6 +50,18 @@ var providerDefaults = map[string]providerDefault{
 	// model-specific, so changing this means re-recording the corpus and
 	// re-reading the results, exactly as it does for the Anthropic default.
 	ProviderOpenAI: {Model: "gpt-5.6-sol", APIKeyEnv: "OPENAI_API_KEY"},
+
+	// gemini-3.8-flash is verified the same way: recorded against all seven
+	// corpus cases (recording.gemini.json), passing every one including
+	// clean, and agreeing with the other two providers on which cases are
+	// action_required — which took a tightening of the prompt's severity
+	// rule (prompts/ADAPTATIONS.md) to achieve. Changing it means
+	// re-recording, as for the other two.
+	//
+	// GEMINI_API_KEY rather than GOOGLE_API_KEY: it is the name the Gemini
+	// API documentation uses, and the one that cannot be mistaken for a GCP
+	// credential.
+	ProviderGemini: {Model: "gemini-3.8-flash", APIKeyEnv: "GEMINI_API_KEY"},
 }
 
 // Config carries the engine's settings. Resolution order: Default, overlaid
@@ -207,9 +220,10 @@ func Load(workspace string) (Config, error) {
 // spending a compare API call and, worse, after the reader has been told a
 // review is in progress.
 func (c Config) validate() error {
-	// Both shipped providers carry a verified default, so this fires only for
-	// a provider added to providerDefaults without one. Keeping it means that
-	// omission surfaces here rather than as an empty model reaching the API.
+	// Every shipped provider carries a verified default, so this fires only
+	// for a provider added to providerDefaults without one. Keeping it means
+	// that omission surfaces here rather than as an empty model reaching the
+	// API with the diff already fetched.
 	if c.Model == "" {
 		return fmt.Errorf(
 			"llm.model must be set when llm.provider is %q: it has no default model, because structured-output support is model-specific and has to be verified per model",

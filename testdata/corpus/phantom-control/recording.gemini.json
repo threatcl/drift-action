@@ -1,0 +1,36 @@
+{
+  "recorded_at": "2026-09-22T02:21:26Z",
+  "source": "corpus/phantom-control",
+  "model": "gemini-3.8-flash",
+  "request_digest": "383a20bb6ede38d99ba5470f0ab4164a53758f4482924e35e5a2c5cc14c6b184",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "1 drift finding: control 'login rate limiting' is now a phantom control after its implementation was removed in internal/auth/ratelimit.go.",
+    "findings": [
+      {
+        "category": "phantom_control",
+        "severity": "action_required",
+        "title": "Control 'login rate limiting' implementation removed",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 17,
+          "quote": "control \"login rate limiting\" implemented=true"
+        },
+        "evidence": [
+          {
+            "file": "internal/auth/ratelimit.go",
+            "line": 6,
+            "note": "RateLimit function was stripped of token-bucket logic and now returns next unconditionally as a no-op."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The PR removes the entire token bucket implementation from internal/auth/ratelimit.go, directly contradicting the implemented control claim."
+        },
+        "agent_prompt": "Update app.tm.hcl: control 'login rate limiting' under threat 'credential stuffing' is marked implemented = true, but RateLimit in internal/auth/ratelimit.go was gutted to a no-op. Set implemented = false or restore the token bucket rate limiter.",
+        "suggested_fix": "Set implemented = false for control 'login rate limiting' in app.tm.hcl."
+      }
+    ]
+  }
+}

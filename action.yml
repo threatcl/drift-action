@@ -17,6 +17,10 @@ inputs:
     description: 'OpenAI API key, used when llm.provider is "openai". Omit to run deterministic checks only.'
     required: false
     default: ''
+  gemini-api-key:
+    description: 'Gemini API key (the Gemini Developer API, not Vertex AI), used when llm.provider is "gemini". Omit to run deterministic checks only.'
+    required: false
+    default: ''
   github-token:
     description: 'Token used to read the PR diff and write the comment and check run'
     required: false
@@ -58,11 +62,12 @@ runs:
   # releases it names the most recent release's image — see docs/RELEASING.md.
   image: 'docker://ghcr.io/threatcl/drift-action@sha256:eb72ee82c93e55a9b8c8459f363a64e02647ec5ce3cc69db022e432980a0e429'
   env:
-    # Both keys are forwarded unconditionally; the engine reads only the one
+    # Every key is forwarded unconditionally; the engine reads only the one
     # its configured provider names in api_key_env, and an unset input arrives
     # as an empty string, which counts as no key. Forwarding on the provider
     # would need the config file read before the container starts, which is
     # exactly backwards.
     ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
     OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+    GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
     GITHUB_TOKEN: ${{ inputs.github-token }}

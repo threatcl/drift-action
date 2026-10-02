@@ -1,7 +1,7 @@
 // Package llm defines the provider abstraction the drift engine runs
-// inference through. Anthropic is implemented; OpenAI is configurable and
-// lands behind this same interface, with Vertex after it. Constructing a
-// provider from config is internal/engine's job, not this package's — the
+// inference through. Anthropic, OpenAI and Gemini (the Developer API, not
+// Vertex) are implemented behind this same interface. Constructing a provider
+// from config is internal/engine's job, not this package's — the
 // implementations import it, so it cannot import them.
 package llm
 

@@ -54,6 +54,17 @@ is asked anything.
   first release (sibling threatcl-action pattern).
 - **2026-08:** Anthropic provider first, behind `internal/llm.Provider`.
   OpenAI/Vertex later, once finding quality is validated.
+- **2026-09:** Gemini is the Gemini *Developer* API (`google.golang.org/genai`,
+  API key, `generativelanguage.googleapis.com`), not Vertex. The backend is
+  pinned to `BackendGeminiAPI` in code so `GOOGLE_GENAI_USE_VERTEXAI` on a
+  runner cannot reroute a review to a GCP project the workflow never named.
+  Vertex, if wanted, is a separate provider with a separate credential story.
+- **2026-09:** A provider earns its default model by recording all seven
+  corpus cases *and* agreeing with the existing providers on which cases are
+  `action_required`. Gemini's first recording passed the assertions but
+  demoted `dfd-drift`; the fix was to tighten the prompt's severity rule so
+  every provider reads the exposure the same way, not to accept a
+  provider-dependent `fail_mode`. Passing the assertions alone is not done.
 - **2026-08:** PR diff comes from the GitHub compare API, not git-in-container.
   Keeps the final image distroless/static, avoids `fetch-depth: 0` and
   `safe.directory` failure modes. Context-file reads use the checkout at
@@ -120,10 +131,10 @@ is asked anything.
   finding" cannot be enforced schema-side — that's why `findings.Sanitize`
   exists.
 - Structured-outputs model support is model-specific. Defaults are
-  `claude-opus-5` and `gpt-5.6-sol` (`config.providerDefaults`), and both are
-  the models the committed corpus recordings were made against. Changing
-  either means re-recording that provider's corpus, not just editing the
-  constant.
+  `claude-opus-5`, `gpt-5.6-sol` and `gemini-3.8-flash`
+  (`config.providerDefaults`), and all three are the models the committed
+  corpus recordings were made against. Changing any means re-recording that
+  provider's corpus, not just editing the constant.
 - `threatcl/spec` discards source ranges: its structs carry no `hcl.Range` and
   its `hclparse.Parser` is never returned. `internal/model.LineIndex` re-parses
   the file with `hclsyntax` to recover line numbers, and joins to spec's
@@ -153,8 +164,15 @@ is asked anything.
 - The partial-contradiction rule in `prompts/drift-ci.md` — an assertion still
   true but now incomplete is `review_recommended`, not `action_required` — is
   what keeps `fail_mode = on-action-required` from flipping a build on
-  judgement wobble. Severity is enforced only in the prompt, so loosening that
-  rule changes CI outcomes with nothing in code to catch it.
+  judgement wobble. Two named exposures take precedence over it (sensitive
+  data reachable without the model's auth; sensitive data reaching another
+  organisation), and their exact wording is load-bearing:
+  `prompts/ADAPTATIONS.md` records how earlier drafts re-categorised
+  `dependency-drift` and demoted `unmodeled-surface` on Gemini. Severity is
+  enforced only in the prompt, so any edit to that section changes CI
+  outcomes with nothing in code to catch it — and although `fixture.Digest`
+  excludes the prompt, a severity edit is a re-record-every-provider event in
+  practice, because agreement on `action_required` is checked by eye.
 - `internal/engine` owns `NewProvider` and `AssembleRequest` because `main`
   and the corpus must build the *same* request. They once didn't: the corpus
   assembled its own and silently stopped setting `Categories`, so the corpus
@@ -166,13 +184,35 @@ is asked anything.
   That is why `config.Load` runs `FromEnv` twice: the first pass supplies
   `config-path`, and only a second can put an explicit `model` input back
   above a provider switch. Validation runs at the end, on the finished config.
-- `openai.strictSchema` translates the shared schema for strict mode inside
-  the provider — the schema itself stays the validation source of truth and
-  goes to Anthropic verbatim. Narrow by design: `const` becomes a
-  single-value `enum`, a const-only property gains the `type` strict mode
-  requires, `$schema` is dropped. A test walks the result asserting every
-  object is structurally strict, so a schema edit that breaks it fails
-  locally rather than at the API.
+- `llm.PortableSchema` translates the shared schema for the providers whose
+  accepted dialect excludes `const` — OpenAI strict mode and Gemini's
+  `responseJsonSchema` draw the same line — while the schema itself stays the
+  validation source of truth and goes to Anthropic verbatim. Narrow by
+  design: `const` becomes a single-value `enum`, a const-only property gains
+  the `type` strict mode requires, `$schema` is dropped. It lives in
+  `internal/llm` because two providers need the identical rewrite; the OpenAI
+  test still walks the result asserting every object is structurally strict,
+  so a schema edit that breaks it fails locally rather than at the API.
+- Gemini refusals have two shapes, and neither carries an explanation. A
+  blocked *prompt* arrives as `promptFeedback.blockReason` with no candidate
+  at all; a classifier stop mid-answer arrives as a candidate `finishReason`
+  of `SAFETY`/`BLOCKLIST`/`PROHIBITED_CONTENT`/`SPII`/`RECITATION`. Both are
+  checked before any text is read, and any other unexpected finish reason is
+  an error even when the preceding text parses. `blockReasonMessage` and
+  `finishMessage` are Vertex-only — the SDK drops them from Gemini API
+  responses — so the category is the whole signal.
+- The genai SDK differs from the other two in ways the Gemini provider has to
+  absorb: `NewClient` fails at construction without a key (so `gemini.New`
+  returns an error and `engine.NewProvider` propagates it); retries are off
+  unless `HTTPRetryOptions` is set (the provider asks for 3 attempts, matching
+  the siblings' default of two retries); `maxOutputTokens` includes thought
+  tokens (so the shared `max_tokens` semantics hold); and thoughts are counted
+  apart from candidates in usage, so `OutputTokens` sums the two to mean the
+  same thing it does elsewhere.
+- Gemini `effort` is sent as `thinkingConfig.thinkingLevel`, which the Gemini
+  3 family accepts and has no value above `HIGH`, so `xhigh` and `max`
+  collapse onto it rather than being rejected for one provider. Gemini 2.5
+  models used `thinkingBudget` instead; the provider does not target them.
 - The corpus asserts category and cited file, never severity or primary
   category — the two providers legitimately disagree there (on `dfd-drift`
   Anthropic leads with `unmodeled_surface`, OpenAI with `dfd_drift`) while
@@ -212,10 +252,19 @@ config, model discovery and line indexing, diff filtering, manifest facts,
 context stuffing, inference, schema validation, the comment renderer, the
 check run wired to `fail_mode`, and `dry-run`.
 
-Two providers ship, Anthropic and OpenAI, both validated against the
-seven-case corpus and agreeing on which cases are `action_required` — so
-`fail_mode` does not depend on which one a repo picks. The corpus replay is
-CI's only finding-quality gate and now fails closed both ways.
+Three providers ship verified — Anthropic, OpenAI and Gemini
+(`internal/llm/gemini`, the Developer API by key, `gemini-3.8-flash`) — all
+recorded against the seven-case corpus and agreeing on which cases are
+`action_required`, so `fail_mode` does not depend on which one a repo picks.
+Gemini's agreement was won by tightening the prompt's severity rule; the
+Anthropic and OpenAI recordings predate that edit (the digest does not cover
+the prompt, so they remain valid) and a live spot-check of both on
+`dfd-drift`, `dependency-drift` and `unmodeled-surface` under the new wording
+is still owed.
+
+The corpus replay is CI's only finding-quality gate and fails closed both
+ways — though it replays only the default provider, so the OpenAI and Gemini
+recordings are not gated there.
 
 Dogfooding is live on this repo's own pull requests, and has already found
 real gaps in this repo's own threat model that the agent-prompt handoff then
@@ -237,9 +286,18 @@ v0.1.2 shipped; v1 is the next cut and the docs already name it.
   `.threatcl-ci.hcl` as an invalid threat model — it should skip the file, as
   engine discovery already does. Tracked in this repo because `/threat-ci` is
   this action's on-ramp, but the work lands in `../claude-plugin`.
-- Vertex is the next provider candidate and faces the same bar the other two
-  cleared: all seven corpus cases under its own recordings, `clean` included.
-  `ReviewResult.Fallback` stays Anthropic-only — do not invent an equivalent.
+- Spot-check Anthropic and OpenAI under the 2026-09 severity wording:
+  `THREATCL_DRIFT_CORPUS=live THREATCL_DRIFT_CORPUS_PROVIDER=<p> <KEY>=… go
+  test ./internal/corpus -run 'TestCorpus$/(dfd-drift|dependency-drift|unmodeled-surface)' -v`
+  and confirm the `action_required` set is unchanged. Re-record them if you
+  want every provider's baseline on the same prompt.
+- CI's corpus replay covers only the default provider. A matrix over the
+  three providers would make the OpenAI and Gemini recordings a gate too.
+- Vertex, if ever, is a separate provider from Gemini — different credential
+  (ADC/project, not an API key) and the `finishMessage` fields the Gemini API
+  drops. Same bar: all seven corpus cases under its own recordings, `clean`
+  included. `ReviewResult.Fallback` stays Anthropic-only — do not invent an
+  equivalent.
 - A fork contributor who changes request assembly cannot re-record the corpus,
   having no key and no secrets on a fork run, so a maintainer re-records on
   the branch. Accepted, and recorded in the threat model.

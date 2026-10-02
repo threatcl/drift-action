@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-09-22T02:22:39Z",
+  "source": "corpus/unmodeled-surface",
+  "model": "gemini-3.8-flash",
+  "request_digest": "983f9d45713522d5c2dd85ac251df20cfcf47b3d999f45714cb3245411e330a9",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Found 1 drift issue: unmodeled endpoint GET /admin/export exposes sensitive user personal data without authentication (action required).",
+    "findings": [
+      {
+        "category": "unmodeled_surface",
+        "severity": "action_required",
+        "title": "Unmodeled endpoint GET /admin/export exposes user data without authentication",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 3,
+          "quote": "Login service exposing POST /login and GET /profile"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 10,
+            "note": "GET /admin/export route is registered without session authentication middleware, unlike GET /profile."
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 9,
+            "note": "exportHandler streams all user records including id, email, and created_at as CSV without authentication or authorization checks."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The PR adds an unauthenticated admin export endpoint that exposes sensitive user personal data (email), creating an unmodeled attack surface with active exposure."
+        },
+        "agent_prompt": "Update app.tm.hcl: The PR adds a new endpoint 'GET /admin/export' in internal/httpapi/routes.go:10 and internal/httpapi/export.go:9 that streams user records (ID, email, created_at) without authentication. Update the threat_model 'login service' description to include GET /admin/export, add an information asset for user account data/emails, and add threats and controls covering unauthorized access and data exfiltration for GET /admin/export.",
+        "suggested_fix": "Add GET /admin/export to app.tm.hcl with threats for unauthorized data export and controls for authentication and authorization."
+      }
+    ]
+  }
+}

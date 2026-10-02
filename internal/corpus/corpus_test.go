@@ -47,13 +47,14 @@ import (
 const modeEnv = "THREATCL_DRIFT_CORPUS"
 
 // providerEnv and modelEnv point the corpus at a provider other than the
-// default. A second provider earns its place by passing these same seven
-// cases under its own recordings, so the harness has to be able to run any
-// of them — recordings are per provider and do not collide.
+// default. A new provider earns its place by passing these same seven cases
+// under its own recordings, so the harness has to be able to run any of them
+// — recordings are per provider and do not collide.
 //
-// modelEnv exists because a provider need not have a default model: openai
-// deliberately has none until one has been verified, and recording is how it
-// gets verified.
+// modelEnv exists because a provider need not have a default model yet: a
+// newly added one deliberately has none until a recording has verified it,
+// and recording is how it gets verified. Every shipped provider now has one,
+// so it is also how a different model is trialled against the corpus.
 const (
 	providerEnv = "THREATCL_DRIFT_CORPUS_PROVIDER"
 	modelEnv    = "THREATCL_DRIFT_CORPUS_MODEL"

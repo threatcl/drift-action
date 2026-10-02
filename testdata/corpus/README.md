@@ -50,9 +50,30 @@ THREATCL_DRIFT_CORPUS_MODEL=… \
 OPENAI_API_KEY=… go test ./internal/corpus -v -timeout 60m
 ```
 
-A second provider earns its place by passing these same seven cases —
-including `clean`, which must stay clean — under its own recordings. Because
-recordings are per provider, doing that never touches the existing baseline.
+A provider earns its place by passing these same seven cases — including
+`clean`, which must stay clean — under its own recordings. Because recordings
+are per provider, doing that never touches the existing baseline.
+
+All three shipped providers have done that, and their recordings agree on
+which cases are `action_required` — the property that keeps `fail_mode`
+provider-independent, and one the assertions deliberately do not check, so
+it is confirmed by eye when a provider is recorded. Gemini's first recording
+did not agree: it rated `dfd-drift` (customer emails posted to an unmodeled
+analytics collector) `review_recommended`, consistently across repeats and
+on `gemini-3.1-pro-preview` too. That was resolved by naming the exposure in
+the prompt's severity rule rather than by accepting the divergence — see
+`prompts/ADAPTATIONS.md` for the wording and the two ways an earlier draft
+perturbed *other* cases. A provider whose recordings pass the assertions but
+disagree on `action_required` is not done.
+
+```bash
+THREATCL_DRIFT_CORPUS=replay \
+THREATCL_DRIFT_CORPUS_PROVIDER=gemini go test ./internal/corpus -v
+
+THREATCL_DRIFT_CORPUS=record \
+THREATCL_DRIFT_CORPUS_PROVIDER=gemini \
+GEMINI_API_KEY=… go test ./internal/corpus -v -timeout 60m
+```
 
 A case with no recording for the configured provider **fails**. This suite is
 CI's only finding-quality gate, so a missing recording has to be a red build
