@@ -267,6 +267,72 @@ func TestLoadSetMissingFileIsRepoRelative(t *testing.T) {
 	}
 }
 
+// model_paths comes from the pull request's own .threatcl-ci.hcl, and what a
+// model file declares is sent to the LLM provider, so no entry may reach a
+// file outside the checkout. The file outside is a valid model each time, so
+// a refusal can only be the confinement and never a parse failure. Both
+// routes are covered: the single-file one hands the path to spec's ParseFile,
+// which would follow a symlink anywhere.
+func TestLoadSetConfinedToCheckout(t *testing.T) {
+	valid, err := os.ReadFile(filepath.Join(testdataRoot, "simple.tm.hcl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := t.TempDir()
+	root := filepath.Join(base, "checkout")
+	writeModel(t, base, "outside.tm.hcl", string(valid))
+	writeModel(t, root, "inside.tm.hcl", string(valid))
+	writeModel(t, root, "set/parent.tm.hcl", mustRead(t, filepath.Join(testdataRoot, "set/parent.tm.hcl")))
+	symlink(t, filepath.Join(base, "outside.tm.hcl"), filepath.Join(root, "escape-absolute.tm.hcl"))
+	symlink(t, "../outside.tm.hcl", filepath.Join(root, "escape-relative.tm.hcl"))
+	symlink(t, "inside.tm.hcl", filepath.Join(root, "alias.tm.hcl"))
+
+	for _, tc := range []struct {
+		name string
+		rels []string
+	}{
+		{"parent traversal", []string{"../outside.tm.hcl"}},
+		{"absolute path", []string{filepath.Join(base, "outside.tm.hcl")}},
+		{"absolute symlink out", []string{"escape-absolute.tm.hcl"}},
+		{"relative symlink out", []string{"escape-relative.tm.hcl"}},
+		{"symlink out within a set", []string{"set/parent.tm.hcl", "escape-relative.tm.hcl"}},
+		{"traversal within a set", []string{"set/parent.tm.hcl", "../outside.tm.hcl"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a, err := LoadSet(root, tc.rels)
+			if err == nil {
+				t.Fatalf("LoadSet(%v) loaded %v; want it refused as outside the checkout", tc.rels, a.Sources)
+			}
+			// An absolute entry is echoed back as configured; a relative one
+			// must not have the runner's path filled in.
+			if !filepath.IsAbs(tc.rels[len(tc.rels)-1]) && strings.Contains(err.Error(), base) {
+				t.Errorf("error = %q, want no runner-absolute path in it", err)
+			}
+		})
+	}
+
+	// A symlink that stays inside is an ordinary repo layout, not an escape.
+	if _, err := LoadSet(root, []string{"alias.tm.hcl"}); err != nil {
+		t.Errorf("a symlink resolving inside the checkout should load: %v", err)
+	}
+}
+
+func mustRead(t *testing.T, path string) string {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(raw)
+}
+
+func symlink(t *testing.T, target, link string) {
+	t.Helper()
+	if err := os.Symlink(target, link); err != nil {
+		t.Skipf("symlinks unavailable here: %v", err)
+	}
+}
+
 // Listing a file twice is collapsed rather than handed to spec, which would
 // reject the set for a duplicate model name. A list that collapses to one
 // file takes the single-file route and renders exactly as that file alone.

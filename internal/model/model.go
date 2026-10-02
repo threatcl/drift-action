@@ -45,16 +45,65 @@ func LoadIn(root, rel string) (*Assertions, error) {
 // it validates the backend block and accepts JSON, and a repo with one model
 // must review exactly as it did before sets existed. Several paths go through
 // ParseHCLRawSet, which is HCL-only.
+//
+// Every path must resolve inside root, whichever route it takes: see
+// readConfined.
 func LoadSet(root string, rels []string) (*Assertions, error) {
 	rels = dedupe(rels)
-	switch len(rels) {
-	case 0:
+	if len(rels) == 0 {
 		return nil, errors.New("no threat model files to load")
-	case 1:
-		return loadFile(filepath.Join(root, rels[0]), rels[0])
-	default:
-		return loadSet(root, rels)
 	}
+	contents, err := readConfined(root, rels)
+	if err != nil {
+		return nil, err
+	}
+	if len(rels) == 1 {
+		return loadFile(filepath.Join(root, rels[0]), rels[0])
+	}
+	return loadSet(root, rels, contents)
+}
+
+// readConfined reads each model file through an os.Root opened on the
+// checkout, refusing any that resolves outside it — by ../, by an absolute
+// path, or by a symlink the pull request adds. model_paths comes from the
+// pull request's own .threatcl-ci.hcl, and what a model file declares is
+// rendered into the prompt sent to the LLM provider, so an unconfined path
+// would let a pull request choose a file from the runner to disclose.
+//
+// The single-file route discards the contents and lets spec's ParseFile read
+// the same path again. That second read is safe because nothing can change
+// the checkout between the two.
+func readConfined(root string, rels []string) ([][]byte, error) {
+	for _, rel := range rels {
+		// os.Root refuses these too; checking first words the error for the
+		// reader rather than as "path escapes from parent".
+		if !filepath.IsLocal(rel) {
+			return nil, fmt.Errorf(
+				"threat model %s is outside the repository: model_paths entries must be relative paths inside it", rel)
+		}
+	}
+
+	workspace, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, fmt.Errorf("opening the workspace: %w", err)
+	}
+	defer func() { _ = workspace.Close() }()
+
+	contents := make([][]byte, len(rels))
+	for i, rel := range rels {
+		content, err := workspace.ReadFile(rel)
+		if err != nil {
+			// The PathError can name the runner-absolute path; rel is the
+			// one the reader configured.
+			var pathErr *fs.PathError
+			if errors.As(err, &pathErr) {
+				err = pathErr.Err
+			}
+			return nil, fmt.Errorf("reading threat model %s: %w", rel, err)
+		}
+		contents[i] = content
+	}
+	return contents, nil
 }
 
 func loadFile(fsPath, displayPath string) (*Assertions, error) {
@@ -72,30 +121,20 @@ func loadFile(fsPath, displayPath string) (*Assertions, error) {
 	}, nil
 }
 
-func loadSet(root string, rels []string) (*Assertions, error) {
+func loadSet(root string, rels []string, contents [][]byte) (*Assertions, error) {
 	inputs := make([]spec.NamedInput, 0, len(rels))
 	files := make([]sourceFile, 0, len(rels))
-	for _, rel := range rels {
-		// Checked before reading, so the error names the real problem rather
+	for i, rel := range rels {
+		// Checked before parsing, so the error names the real problem rather
 		// than an HCL syntax error from parsing JSON as HCL.
 		if filepath.Ext(rel) != ".hcl" {
 			return nil, fmt.Errorf(
 				"threat model %s: a multi-file set must be HCL — spec parses sets from HCL only", rel)
 		}
 		fsPath := filepath.Join(root, rel)
-		content, err := os.ReadFile(fsPath)
-		if err != nil {
-			// The PathError names the runner-absolute path; rel is the one
-			// the reader configured.
-			var pathErr *fs.PathError
-			if errors.As(err, &pathErr) {
-				err = pathErr.Err
-			}
-			return nil, fmt.Errorf("reading threat model %s: %w", rel, err)
-		}
 		// Name is the real path, not rel: spec resolves a relative
 		// `including` or import against it.
-		inputs = append(inputs, spec.NamedInput{Name: fsPath, Content: content})
+		inputs = append(inputs, spec.NamedInput{Name: fsPath, Content: contents[i]})
 		files = append(files, sourceFile{path: fsPath, display: rel})
 	}
 

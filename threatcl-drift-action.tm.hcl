@@ -17,7 +17,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   information_asset "repository source code" {
-    description                = "Full contents of security-relevant repo files plus the PR diff, selected as context and transmitted to the LLM provider on every review"
+    description                = "Full contents of security-relevant repo files plus the PR diff, selected as context and transmitted to the LLM provider on every review, together with what every assessed threat model file declares — the files model_paths names in .threatcl-ci.hcl, configuration the pull request itself can edit, or the single file discovery finds"
     information_classification = "Confidential"
   }
 
@@ -136,6 +136,12 @@ threatmodel "threatcl-drift-action" {
     description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the configured LLM provider as a condition of every review — the Anthropic API by default, or the OpenAI API or the Gemini API when llm.provider selects one, each recorded as its own third_party_dependency. The files chosen are exactly the ones that back the model's controls and threats, so the disclosure is targeted rather than incidental. Which third party receives it is a repository's own configuration choice, and nothing in the engine constrains that choice beyond the provider having to be one it implements"
     impacts     = ["Confidentiality"]
     stride      = ["Info Disclosure"]
+
+    control "Threat model files are read only from inside the checkout" {
+      description    = "model_paths is read from the pull request's own .threatcl-ci.hcl, so which model files are parsed, and whose declared content is rendered into the prompt, is PR-controlled. internal/model/model.go refuses an entry that is not a local relative path and reads every model file through an os.Root opened on the checkout, which also refuses a symlink resolving outside it — whether model_paths or discovery named the file, on both the single-file and multi-file routes. Not covered: including and imports inside a model are resolved by threatcl/spec, outside this check; and context stuffing has its own guard in internal/llm/context.go, which compares paths lexically and follows symlinks"
+      implemented    = true
+      risk_reduction = 20
+    }
   }
 
   threat "Coverage gap renders as a clean review" {

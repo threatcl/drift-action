@@ -171,6 +171,16 @@ is asked anything.
   `ParseHCLRawSet` is HCL-only and skips `validateBackend`, so a JSON file in
   a multi-file list is refused by name, and `NamedInput.Name` is the real
   filesystem path because spec resolves `including` and imports against it.
+- Model files are read through an `os.Root` on the checkout
+  (`model.readConfined`), on both routes. `model_paths` comes from the pull
+  request's own `.threatcl-ci.hcl`, and what a model file declares is sent to
+  the LLM provider, so an entry that escapes — `../`, an absolute path, or a
+  symlink the PR adds — would let a PR pick a runner file to disclose. Escapes
+  are refused, never reinterpreted: `/threatmodels/x.hcl` is an error, not a
+  repo-relative path. `including`/imports inside a model resolve through spec
+  and are not confined; context stuffing's `readInWorkspace` is lexical only
+  and follows symlinks. Both residuals are recorded on the threat model's
+  `TCL-T-LLM-DATASHARE` control.
 - Both `claude-opus-5` and `claude-sonnet-5` carry elevated cybersecurity
   safeguards, and we send security-relevant diffs. A refusal arrives as
   HTTP 200 with `stop_reason: "refusal"` and possibly an empty content array —
