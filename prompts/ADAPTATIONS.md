@@ -47,6 +47,30 @@ upstream changes those, re-vendor and re-derive.
   `action-required-count` and can flip the build under
   `fail_mode = "on-action-required"` — the plugin has no build to fail, so
   the rule is CI-only.
+- Two named exposures inside the "concrete, currently-exposed risk" clause,
+  given precedence over the partial-contradiction rule: sensitive data
+  (Confidential or Restricted by the model, or plainly so) reachable without
+  the authentication the model's other paths rely on, and sensitive data now
+  reaching another organisation's service or endpoint the model does not
+  show. Both are `action_required` whatever category they are filed under.
+  Added when the Gemini provider was recorded against the corpus: on
+  `dfd-drift` (customer emails posted to an unmodeled analytics collector)
+  Anthropic and OpenAI escalated under the bare risk clause while Gemini —
+  consistently, on two models — read the partial rule's own example as
+  covering it and stayed at `review_recommended`, which made `fail_mode`
+  gating provider-dependent. Three things about the wording were learned
+  the expensive way and are deliberate. It names *two* shapes: a draft that
+  named only the disclosure one anchored Gemini's reading of "concrete
+  risk" to that shape, and it demoted the unauthenticated `/admin/export`
+  of `unmodeled-surface` to `review_recommended` twice out of twice, its
+  justification no longer mentioning authentication at all. It defines the
+  disclosure *recipient* (another organisation) rather than excluding
+  internal infrastructure: drafts that said "a new store or component the
+  system itself runs is not this" re-filed `dependency-drift` (session
+  tokens into Redis) as `unmodeled_surface` three runs out of three, because
+  describing the exclusion in component terms reframed a dependency question
+  as a data-flow one. And it avoids the phrase "third party", which is the
+  name of the dependency category and reads as "third-party library".
 - `CONTEXT FILES` lines carry `N→` line-number prefixes, with instructions
   to cite the printed number and to strip the prefix when quoting.
   Upstream runs inside Claude Code where the model reads files with

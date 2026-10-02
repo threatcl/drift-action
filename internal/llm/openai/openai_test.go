@@ -256,46 +256,12 @@ func TestReviewRejectsStreamWithNoTerminalEvent(t *testing.T) {
 	}
 }
 
-func TestStrictSchemaRewritesConst(t *testing.T) {
-	schema, err := strictSchema(findings.SchemaJSON)
-	if err != nil {
-		t.Fatalf("translating the schema: %v", err)
-	}
-
-	if _, ok := schema["$schema"]; ok {
-		t.Error("$schema should be dropped: it describes the dialect, not the instance")
-	}
-
-	properties, _ := schema["properties"].(map[string]any)
-	version, _ := properties["schema_version"].(map[string]any)
-	if version == nil {
-		t.Fatalf("schema_version property missing: %v", properties)
-	}
-	if _, ok := version["const"]; ok {
-		t.Error("const survived the translation")
-	}
-	enum, _ := version["enum"].([]any)
-	if len(enum) != 1 || enum[0] != "0.1" {
-		t.Errorf("const did not become an equivalent single-value enum: %v", version)
-	}
-	if version["type"] != "string" {
-		t.Errorf("a const-only property must gain a type for strict mode: %v", version)
-	}
-
-	// The properties the real schema already gets right must survive intact.
-	if schema["additionalProperties"] != false {
-		t.Error("additionalProperties:false was lost")
-	}
-	if required, ok := schema["required"].([]any); !ok || len(required) != 4 {
-		t.Errorf("required list was lost: %v", schema["required"])
-	}
-}
-
 // Every object in the translated schema must satisfy strict mode's two
 // structural rules, so a future schema edit that breaks them fails here rather
-// than at the API.
-func TestStrictSchemaIsStructurallyStrict(t *testing.T) {
-	schema, err := strictSchema(findings.SchemaJSON)
+// than at the API. The translation itself is llm.PortableSchema and is tested
+// there; what this pins is that its output meets *this* provider's contract.
+func TestPortableSchemaIsStructurallyStrict(t *testing.T) {
+	schema, err := llm.PortableSchema(findings.SchemaJSON)
 	if err != nil {
 		t.Fatalf("translating the schema: %v", err)
 	}

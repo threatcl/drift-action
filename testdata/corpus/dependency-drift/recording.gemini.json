@@ -1,0 +1,69 @@
+{
+  "recorded_at": "2026-09-22T02:20:53Z",
+  "source": "corpus/dependency-drift",
+  "model": "gemini-3.8-flash",
+  "request_digest": "2026d998d09ced672fbafd6525315154774764028bf5110503161cbafbe872ac",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Detected 2 drift findings (2 review recommended): unmodeled Redis session storage surface and an undeclared go-redis third-party dependency.",
+    "findings": [
+      {
+        "category": "dependency_drift",
+        "severity": "review_recommended",
+        "title": "Unmodeled third-party dependency github.com/redis/go-redis/v9",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 23,
+          "quote": "third_party_dependency \"identity provider\" uptime_dependency=degraded"
+        },
+        "evidence": [
+          {
+            "file": "go.mod",
+            "line": 6,
+            "note": "github.com/redis/go-redis/v9 v9.7.0 is added as a direct dependency without a corresponding third-party dependency assertion in app.tm.hcl."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "A new external client library is introduced for session caching, but the threat model does not list it among third-party dependencies."
+        },
+        "agent_prompt": "Update app.tm.hcl: add a third_party_dependency block for 'redis' (github.com/redis/go-redis/v9) added in go.mod:6, documenting its role and uptime dependency for the login service session cache.",
+        "suggested_fix": "Add a third_party_dependency block for Redis / go-redis in app.tm.hcl."
+      },
+      {
+        "category": "unmodeled_surface",
+        "severity": "review_recommended",
+        "title": "Unmodeled Redis session caching storage and retrieval path",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "information_asset \"session tokens\" classification=Restricted"
+        },
+        "evidence": [
+          {
+            "file": "internal/session/cache.go",
+            "line": 17,
+            "note": "NewCache initializes a new Redis client connecting to an external Redis instance."
+          },
+          {
+            "file": "internal/session/cache.go",
+            "line": 22,
+            "note": "Put stores Restricted session tokens in Redis via client.Set."
+          },
+          {
+            "file": "internal/session/cache.go",
+            "line": 27,
+            "note": "Get fetches session tokens from Redis via client.Get to resolve user sessions."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "Restricted session tokens are now persisted and resolved over a network cache (Redis), introducing an attack surface not captured by existing model threats."
+        },
+        "agent_prompt": "Update app.tm.hcl: document threats and security controls covering the Redis session cache introduced in internal/session/cache.go, specifically addressing network transport security, cache access controls, and storage protection for Restricted session tokens.",
+        "suggested_fix": "Add threats and controls in app.tm.hcl for session token caching and transmission to Redis."
+      }
+    ]
+  }
+}

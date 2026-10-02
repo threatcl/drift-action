@@ -250,3 +250,53 @@ func TestOpenAIDefaultModelIsVerified(t *testing.T) {
 		t.Errorf("openai should now validate without an explicit model: %v", err)
 	}
 }
+
+// TestGeminiDefaultModelIsVerified pins the default to the model the
+// committed Gemini recordings were made against, exactly as the OpenAI pin
+// does. Changing it without re-recording would leave the corpus measuring a
+// model the action no longer uses.
+func TestGeminiDefaultModelIsVerified(t *testing.T) {
+	cfg, err := Default().WithProvider(ProviderGemini)
+	if err != nil {
+		t.Fatalf("selecting gemini: %v", err)
+	}
+	if cfg.Model != "gemini-3.8-flash" {
+		t.Errorf("gemini default model = %q; if this changed deliberately, re-record the corpus", cfg.Model)
+	}
+	if cfg.APIKeyEnv != "GEMINI_API_KEY" {
+		t.Errorf("api_key_env = %q", cfg.APIKeyEnv)
+	}
+	if err := cfg.validate(); err != nil {
+		t.Errorf("gemini should validate without an explicit model: %v", err)
+	}
+}
+
+// TestLoadSelectsGeminiWithoutAModel: selecting the provider is the whole
+// config change a repo needs, as for the other two.
+func TestLoadSelectsGeminiWithoutAModel(t *testing.T) {
+	workspace := filepath.Dir(writeConfig(t, `llm { provider = "gemini" }`))
+
+	cfg, err := Load(workspace)
+	if err != nil {
+		t.Fatalf("selecting gemini alone should be enough: %v", err)
+	}
+	if cfg.Provider != ProviderGemini || cfg.Model == "" || cfg.APIKeyEnv != "GEMINI_API_KEY" {
+		t.Errorf("incomplete gemini config: %q/%q/%q", cfg.Provider, cfg.Model, cfg.APIKeyEnv)
+	}
+}
+
+// TestGeminiModelFromInput: the model action input still wins over the
+// provider default, so a workflow can trial another Gemini model without
+// editing the config file.
+func TestGeminiModelFromInput(t *testing.T) {
+	workspace := filepath.Dir(writeConfig(t, `llm { provider = "gemini" }`))
+	t.Setenv("INPUT_MODEL", "gemini-3.1-pro-preview")
+
+	cfg, err := Load(workspace)
+	if err != nil {
+		t.Fatalf("loading: %v", err)
+	}
+	if cfg.Model != "gemini-3.1-pro-preview" {
+		t.Errorf("model = %q, want the action input to win over the provider default", cfg.Model)
+	}
+}

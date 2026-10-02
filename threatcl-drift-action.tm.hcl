@@ -27,7 +27,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   information_asset "action credentials" {
-    description                = "The Anthropic API key, the OpenAI API key and the GitHub token the action holds at runtime; the token carries PR write permission. Both provider keys are forwarded into the container unconditionally by action.yml — deciding which to forward would need the config file read before the container starts — and the engine reads only the one its configured api_key_env names, so an unset input arrives as an empty string and counts as no key. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, the RELEASER_APP_PRIVATE_KEY GitHub App private key secret and the RELEASER_APP_ID variable identifying the app, and the short-lived installation token minted from them by actions/create-github-app-token@v2 in the tag-release job — that job's own GITHUB_TOKEN is contents: read, and it is the installation token, persisted as the checkout push credential, that pushes the digest commit to main and can create and force-move tags in this repository, including the floating major alias consumers resolve. Any workflow run on a non-fork ref that can read RELEASER_APP_PRIVATE_KEY can mint that token"
+    description                = "The Anthropic API key, the OpenAI API key, the Gemini API key and the GitHub token the action holds at runtime; the token carries PR write permission. All three provider keys are forwarded into the container unconditionally by action.yml — deciding which to forward would need the config file read before the container starts — and the engine reads only the one its configured api_key_env names, so an unset input arrives as an empty string and counts as no key. Release time adds a second set, held by .github/workflows/release.yml rather than the engine: a packages: write token for the ghcr push, the RELEASER_APP_PRIVATE_KEY GitHub App private key secret and the RELEASER_APP_ID variable identifying the app, and the short-lived installation token minted from them by actions/create-github-app-token@v2 in the tag-release job — that job's own GITHUB_TOKEN is contents: read, and it is the installation token, persisted as the checkout push credential, that pushes the digest commit to main and can create and force-move tags in this repository, including the floating major alias consumers resolve. Any workflow run on a non-fork ref that can read RELEASER_APP_PRIVATE_KEY can mint that token"
     information_classification = "Restricted"
   }
 
@@ -133,7 +133,7 @@ threatmodel "threatcl-drift-action" {
 
   threat "Repo source and diff shared with the LLM provider" {
     ref         = "TCL-T-LLM-DATASHARE"
-    description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the configured LLM provider as a condition of every review — the Anthropic API by default, or the OpenAI API when llm.provider selects it, each recorded as its own third_party_dependency. The files chosen are exactly the ones that back the model's controls and threats, so the disclosure is targeted rather than incidental. Which third party receives it is a repository's own configuration choice, and nothing in the engine constrains that choice beyond the provider having to be one it implements"
+    description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the configured LLM provider as a condition of every review — the Anthropic API by default, or the OpenAI API or the Gemini API when llm.provider selects one, each recorded as its own third_party_dependency. The files chosen are exactly the ones that back the model's controls and threats, so the disclosure is targeted rather than incidental. Which third party receives it is a repository's own configuration choice, and nothing in the engine constrains that choice beyond the provider having to be one it implements"
     impacts     = ["Confidentiality"]
     stride      = ["Info Disclosure"]
   }
@@ -197,7 +197,7 @@ threatmodel "threatcl-drift-action" {
     stride      = ["Repudiation", "Denial Of Service"]
 
     control "Refusal, truncation and fallback handling" {
-      description    = "Both providers check every terminal condition before any output is read, and both render a refusal as could-not-assess, never no-drift, with truncation a hard error rather than a half-review. internal/llm/anthropic/anthropic.go reads stop_reason, detects fallbacks from usage.iterations, and the comment names the model that actually served the review. internal/llm/openai/openai.go has no single stop reason to read: a refusal arrives either as a refusal content part alongside the text parts or as incomplete_details.reason content_filter, so it checks both, and it never sets ReviewResult.Fallback because that API has no server-side fallback to report — a synthesised one would misreport which model answered. Each provider's refusal and truncation paths are covered by unit tests against a recorded response rather than a live call"
+      description    = "Every provider checks every terminal condition before any output is read, and each renders a refusal as could-not-assess, never no-drift, with truncation a hard error rather than a half-review. internal/llm/anthropic/anthropic.go reads stop_reason, detects fallbacks from usage.iterations, and the comment names the model that actually served the review. internal/llm/openai/openai.go has no single stop reason to read: a refusal arrives either as a refusal content part alongside the text parts or as incomplete_details.reason content_filter, so it checks both, and it never sets ReviewResult.Fallback because that API has no server-side fallback to report — a synthesised one would misreport which model answered. internal/llm/gemini/gemini.go has two refusal shapes of its own: a blocked prompt arrives as promptFeedback.blockReason with no candidate at all, and a classifier stop mid-answer arrives as a candidate finishReason of SAFETY, BLOCKLIST, PROHIBITED_CONTENT, SPII or RECITATION, so both are checked before any text is read, MAX_TOKENS is the truncation error, and any other unexpected finish reason is an error rather than a report — even when the text that preceded it happens to parse. Each provider's refusal and truncation paths are covered by unit tests against a recorded response rather than a live call"
       implemented    = true
       risk_reduction = 60
     }
@@ -211,6 +211,12 @@ threatmodel "threatcl-drift-action" {
 
   third_party_dependency "OpenAI API" {
     description       = "The alternative inference provider, selected by llm.provider in .threatcl-ci.hcl. It receives exactly the same repository source excerpts and diff as the Anthropic API when configured, so the disclosure boundary is identical and only the recipient changes — a repository choosing it is choosing which third party sees its code. Not reached at all unless configured, but a hard dependency for any repository that does. It has earned that place rather than merely compiling: a parallel set of corpus recordings (testdata/corpus/*/recording.openai.json, gpt-5.6-sol) is committed for it, one per drift category plus the clean case, and all seven pass"
+    saas              = true
+    uptime_dependency = "hard"
+  }
+
+  third_party_dependency "Gemini API" {
+    description       = "The third inference provider, selected by llm.provider in .threatcl-ci.hcl. This is the Gemini Developer API at generativelanguage.googleapis.com, authenticated by API key — not Vertex AI, and internal/llm/gemini/gemini.go pins the backend explicitly so a GOOGLE_GENAI_USE_VERTEXAI variable in a runner's environment cannot reroute a review to a GCP project the workflow never named. It receives exactly the same repository source excerpts and diff as the other two when configured, so the disclosure boundary is identical and only the recipient changes. Not reached at all unless configured, but a hard dependency for any repository that does. It has earned its place the same way as the OpenAI API: a parallel set of corpus recordings (testdata/corpus/*/recording.gemini.json, gemini-3.8-flash) is committed for it, one per drift category plus the clean case, all seven pass, and it agrees with the other two providers on which cases are action_required — an agreement that required tightening the severity rule in prompts/drift-ci.md, because its first recording demoted confidential data egressing to an unmodeled external service"
     saas              = true
     uptime_dependency = "hard"
   }
@@ -264,7 +270,7 @@ threatmodel "threatcl-drift-action" {
     # Jobs in this repo's workflows that hold a credential. Two of them, on
     # different triggers with different grants: the review job holds whichever
     # provider key is wired up — secrets.ANTHROPIC_API_KEY here, though
-    # action.yml forwards an OpenAI key just as readily — and a
+    # action.yml forwards an OpenAI or Gemini key just as readily — and a
     # pull-requests/checks write-scoped
     # GITHUB_TOKEN on pull_request, and the release jobs run on a
     # workflow_dispatch — publish-image with packages: write, tag-release with
@@ -296,13 +302,17 @@ threatmodel "threatcl-drift-action" {
         trust_zone = "External APIs"
       }
 
-      # The alternative inference recipient, reached when llm.provider selects
-      # it. Its own element rather than folded into the one above, because the
-      # disclosure boundary is per-recipient: a repository choosing openai is
-      # choosing which third party sees its source, and a diagram that showed
-      # one box for "the LLM" would hide that choice. Exactly one of the two
-      # review-request flows is exercised per run.
+      # The alternative inference recipients, reached when llm.provider selects
+      # one. Each its own element rather than folded into the one above,
+      # because the disclosure boundary is per-recipient: a repository choosing
+      # openai or gemini is choosing which third party sees its source, and a
+      # diagram that showed one box for "the LLM" would hide that choice.
+      # Exactly one of the three review-request flows is exercised per run.
       external_element "OpenAI API" {
+        trust_zone = "External APIs"
+      }
+
+      external_element "Gemini API" {
         trust_zone = "External APIs"
       }
 
@@ -383,11 +393,16 @@ threatmodel "threatcl-drift-action" {
     }
 
     # The same payload — prompt, model assertions, context files, diff — to
-    # the other provider. Which edge a given run takes is decided by
-    # llm.provider in .threatcl-ci.hcl, and never both in one review.
+    # the other providers. Which edge a given run takes is decided by
+    # llm.provider in .threatcl-ci.hcl, and never more than one in one review.
     flow "review request to openai" {
       from = "Drift Review Engine"
       to   = "OpenAI API"
+    }
+
+    flow "review request to gemini" {
+      from = "Drift Review Engine"
+      to   = "Gemini API"
     }
 
     flow "sticky comment and check run" {

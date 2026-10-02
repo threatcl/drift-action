@@ -1,0 +1,46 @@
+{
+  "recorded_at": "2026-09-22T02:21:18Z",
+  "source": "corpus/dfd-drift",
+  "model": "gemini-3.8-flash",
+  "request_digest": "1144b20f70ed1ef70ad690ca498a55e685a7dfad1047ccc0d677f7ec3e06b796",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Found 1 action-required drift finding: confidential order history is transmitted to an unmodeled third-party analytics service missing from the checkout DFD.",
+    "findings": [
+      {
+        "category": "dfd_drift",
+        "severity": "action_required",
+        "title": "Unmodeled external analytics service and data flow in checkout DFD",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 23,
+          "quote": "data_flow_diagram_v2 \"checkout\""
+        },
+        "evidence": [
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 9,
+            "note": "Defines third-party analytics endpoint analyticsURL pointing to https://collector.example-analytics.com/v1/events"
+          },
+          {
+            "file": "internal/orders/analytics.go",
+            "line": 22,
+            "note": "http.Post sends payload containing CustomerEmail and AmountCents to analyticsURL"
+          },
+          {
+            "file": "internal/orders/orders.go",
+            "line": 8,
+            "note": "Store.Create invokes publishAnalytics(o) on order creation"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The PR transmits confidential customer order data (email and purchase amounts) to an unmodeled external service via HTTP POST."
+        },
+        "agent_prompt": "Update app.tm.hcl in data_flow_diagram_v2 \"checkout\": add an external_element for the analytics service (e.g., external_element \"Analytics Collector\") and an HTTPS flow from process \"Web App\" to \"Analytics Collector\" carrying order events. This is motivated by the addition of internal/orders/analytics.go, where publishAnalytics transmits confidential customer order data (email and amount) to https://collector.example-analytics.com/v1/events.",
+        "suggested_fix": "Add an external_element for the analytics service and an outbound HTTPS data flow from Web App in data_flow_diagram_v2 \"checkout\"."
+      }
+    ]
+  }
+}

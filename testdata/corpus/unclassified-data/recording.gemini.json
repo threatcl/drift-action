@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-09-22T02:21:43Z",
+  "source": "corpus/unclassified-data",
+  "model": "gemini-3.8-flash",
+  "request_digest": "c1b18078e9a528c9884a4c05b689c428d68e191775e26ced7dcab0ee10b6c2f4",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Found 1 drift issue (review recommended): unclassified sensitive personal data (Tax ID, Date of Birth) added to the profile API response.",
+    "findings": [
+      {
+        "category": "unclassified_data",
+        "severity": "review_recommended",
+        "title": "Unclassified sensitive personal data in profile response",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "information_asset \"user credentials\" classification=Restricted (app.tm.hcl:7)"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 11,
+            "note": "TaxID and DateOfBirth fields added to profileResponse struct"
+          },
+          {
+            "file": "internal/httpapi/user.go",
+            "line": 22,
+            "note": "TaxID and DateOfBirth serialized in profileHandler HTTP response"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "Sensitive personal identifiable information (Tax ID and Date of Birth) has been introduced to the profile response without corresponding information asset classification."
+        },
+        "agent_prompt": "Update app.tm.hcl: add an information_asset block for user profile PII (such as TaxID and DateOfBirth) with classification Restricted, as internal/httpapi/user.go now exposes these sensitive personal data fields in GET /profile responses.",
+        "suggested_fix": "Add an information_asset block to app.tm.hcl defining user personal data (TaxID, DateOfBirth) with appropriate classification."
+      }
+    ]
+  }
+}

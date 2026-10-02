@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-09-22T02:21:34Z",
+  "source": "corpus/stale-assertion",
+  "model": "gemini-3.8-flash",
+  "request_digest": "0f187945b18a0ec8a32e64688caa0028d5d669f0f98fb4d154b3e701e71826c6",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "1 drift finding: threat 'credential database theft' asserts bcrypt at cost 12 but the code now uses Argon2id.",
+    "findings": [
+      {
+        "category": "stale_assertion",
+        "severity": "action_required",
+        "title": "Password hashing algorithm changed from bcrypt to Argon2id",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 12,
+          "quote": "Passwords are hashed with bcrypt at cost 12 in internal/auth/password.go, which keeps offline cracking expensive."
+        },
+        "evidence": [
+          {
+            "file": "internal/auth/password.go",
+            "line": 18,
+            "note": "HashPassword now computes password hashes using argon2.IDKey instead of bcrypt at cost 12"
+          },
+          {
+            "file": "internal/auth/password.go",
+            "line": 38,
+            "note": "VerifyPassword now compares Argon2id derived keys instead of calling bcrypt.CompareHashAndPassword"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The threat description makes a concrete claim about the password hashing algorithm and cost parameter that is directly contradicted by the migration to Argon2id."
+        },
+        "agent_prompt": "Update app.tm.hcl: in threat 'credential database theft' (around line 12), update the description to reflect that passwords are now hashed using Argon2id in internal/auth/password.go rather than bcrypt at cost 12.",
+        "suggested_fix": "Update threat 'credential database theft' description to reference Argon2id hashing instead of bcrypt at cost 12."
+      }
+    ]
+  }
+}

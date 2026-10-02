@@ -126,12 +126,21 @@ the model's information assets — if no asset covers the new data, flag it.
   phantom controls.
 - `review_recommended`: everything else by default (unclassified data, minor
   DFD gaps, dependency drift). Escalate to `action_required` only when the
-  evidence shows a concrete, currently-exposed risk.
+  evidence shows a concrete, currently-exposed risk. Two shapes always
+  qualify: sensitive data reachable without the authentication or
+  authorisation the model's other paths rely on, and sensitive data now
+  reaching another organisation's service or endpoint that the model does
+  not show. Sensitive means Confidential or Restricted by the model's
+  classification, or plainly so, such as credentials or personal data. Both
+  are exposures the model's owner does not know about, whichever category
+  the finding is filed under.
 - A **partially** contradicted assertion is `review_recommended`, not
   `action_required`. Partial means the assertion is still true as far as it
   goes but is now incomplete — the code also does something it doesn't cover
   ("data is stored in X" when data now flows to X *and* Y). Reserve
-  `action_required` for assertions the change makes false.
+  `action_required` for assertions the change makes false — and for the two
+  exposures above, which are exposures in themselves even when the assertion
+  they contradict is merely incomplete.
 
 ## Per-finding fields
 
