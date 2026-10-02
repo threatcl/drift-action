@@ -10,7 +10,7 @@ import (
 
 func TestCommentCleanReport(t *testing.T) {
 	out := Comment(&findings.Report{NoDrift: true}, ContextInfo{
-		ModelPath:    "payments.tm.hcl",
+		ModelPaths:   []string{"payments.tm.hcl"},
 		ModelSummary: "3 threats, 2 controls (1 implemented)",
 		AnalysisMode: "deterministic checks only",
 	})
@@ -21,8 +21,23 @@ func TestCommentCleanReport(t *testing.T) {
 	if !strings.Contains(out, "No drift detected") {
 		t.Errorf("clean report should say so plainly:\n%s", out)
 	}
-	if !strings.Contains(out, "payments.tm.hcl") {
-		t.Errorf("context block should name the model:\n%s", out)
+	// One file renders exactly as it did before sets existed.
+	if want := "- ✅ Threat model: `payments.tm.hcl` — 3 threats, 2 controls (1 implemented)\n"; !strings.Contains(out, want) {
+		t.Errorf("context block should name the model as %q:\n%s", want, out)
+	}
+}
+
+// A set is disclosed file by file: a reader cannot otherwise tell which parts
+// of a split model were in scope.
+func TestCommentContextListsEveryModelFile(t *testing.T) {
+	out := Comment(&findings.Report{NoDrift: true}, ContextInfo{
+		ModelPaths:   []string{"threatmodels/payments.tm.hcl", "threatmodels/payments-api.tm.hcl"},
+		ModelSummary: "2 threats, 2 controls (2 implemented)",
+	})
+
+	want := "- ✅ Threat model set, 2 files: `threatmodels/payments.tm.hcl`, `threatmodels/payments-api.tm.hcl` — 2 threats, 2 controls (2 implemented)\n"
+	if !strings.Contains(out, want) {
+		t.Errorf("context block should list every model file as %q:\n%s", want, out)
 	}
 }
 

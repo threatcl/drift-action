@@ -1,0 +1,7 @@
+[
+  {
+    "path": "internal/session/expiry.go",
+    "status": "modified",
+    "patch_file": "patches/expiry.go.patch"
+  }
+]

@@ -1,9 +1,10 @@
 # Finding-quality corpus
 
 Paired threat models and synthetic diffs with known expected findings — one
-case per drift category, plus a `clean` case that must produce none. This is
-the suite that says whether the engine is any good; everything else in the
-repo only says whether it runs.
+case per drift category, plus a `clean` case that must produce none, and
+`multi-file-set`, whose threat model is a hierarchy split across two files
+listed in `model_paths`. This is the suite that says whether the engine is any
+good; everything else in the repo only says whether it runs.
 
 The harness is `internal/corpus/corpus_test.go`.
 
@@ -14,7 +15,7 @@ assembles into a review request. `TestCorpus` runs actual reviews and is
 gated on an env var so `go test ./...` never costs money:
 
 ```bash
-# Pay for a full run, ~7 reviews at the default model and effort:
+# Pay for a full run, one review per case at the default model and effort:
 THREATCL_DRIFT_CORPUS=live ANTHROPIC_API_KEY=… go test ./internal/corpus -v -timeout 60m
 
 # Pay once, and keep each case's review in <case>/recording.<provider>.json:
@@ -50,8 +51,8 @@ THREATCL_DRIFT_CORPUS_MODEL=… \
 OPENAI_API_KEY=… go test ./internal/corpus -v -timeout 60m
 ```
 
-A provider earns its place by passing these same seven cases — including
-`clean`, which must stay clean — under its own recordings. Because recordings
+A provider earns its place by passing these same cases — including `clean`,
+which must stay clean — under its own recordings. Because recordings
 are per provider, doing that never touches the existing baseline.
 
 All three shipped providers have done that, and their recordings agree on
@@ -79,7 +80,7 @@ A case with no recording for the configured provider **fails**. This suite is
 CI's only finding-quality gate, so a missing recording has to be a red build
 rather than a case that quietly drops out of it — adding a case means
 recording it. Recordings are per provider (`recording.anthropic.json`), since
-each provider earns its place on these same seven cases under its own
+each provider earns its place on these same cases under its own
 recordings and adding one must leave the others' baselines untouched.
 
 ## Case layout
@@ -90,6 +91,10 @@ recordings and adding one must leave the others' baselines untouched.
                        model references that the diff touches (context stuffing
                        reads exactly that intersection — other files are never
                        read and are not included)
+  workspace/.threatcl-ci.hcl
+                       optional, read as the action reads a repo's; a case
+                       whose model spans several files needs one for
+                       model_paths, because discovery refuses to guess
   changes.json         the PR diff: [{path, status, patch_file}, …]
   patches/*.patch      unified-diff hunks, GitHub compare API style: hunks
                        only, no ---/+++ headers. Blank context lines must be
@@ -114,10 +119,16 @@ recordings and adding one must leave the others' baselines untouched.
 }
 ```
 
+A finding may also carry `"model_file"`: the threat model file its excerpt
+must cite. Only a multi-file case has a wrong answer to that — citing the
+child for a control its parent declares sends the fix to a file that does not
+contain it — so single-file cases leave it out.
+
 ## What is asserted, and what deliberately is not
 
 A case passes when, for every expected finding, the review produced **at
-least one finding of that category whose evidence cites that file**. The
+least one finding of that category whose evidence cites that file** — and,
+where the expectation names a `model_file`, whose model excerpt cites it. The
 clean case passes when the review produced **no findings and said
 `no_drift`** — a finding there is the cries-wolf failure mode, and it fails.
 

@@ -1,0 +1,36 @@
+{
+  "recorded_at": "2026-10-02T11:20:04Z",
+  "source": "corpus/multi-file-set",
+  "model": "gemini-3.8-flash",
+  "request_digest": "3d50bbd7a5097eae1446c4332b9e28bc0d8fd346e54a22befecf585b28fcfb84",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "1 drift finding detected (1 action required): control 'idle session expiry' is now a phantom control following removal of the timeout check in internal/session/expiry.go.",
+    "findings": [
+      {
+        "category": "phantom_control",
+        "severity": "action_required",
+        "title": "Idle session expiry control removed from middleware",
+        "model_excerpt": {
+          "file": "threatmodels/storefront.tm.hcl",
+          "line": 18,
+          "quote": "control \"idle session expiry\" implemented=true"
+        },
+        "evidence": [
+          {
+            "file": "internal/session/expiry.go",
+            "line": 10,
+            "note": "The 30-minute idleTimeout check and session deletion logic were removed; Expiry now only updates LastSeen and never rejects expired sessions."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The PR directly removes the 30-minute idle session rejection logic that backs the implemented control."
+        },
+        "agent_prompt": "Update threatmodels/storefront.tm.hcl: in threat 'session hijacking', control 'idle session expiry' is marked implemented = true, but the 30-minute idle timeout check was removed from internal/session/expiry.go. Set implemented = false on the control or re-implement idle timeout enforcement.",
+        "suggested_fix": "Set implemented = false for control 'idle session expiry' in threatmodels/storefront.tm.hcl or restore the expiration logic."
+      }
+    ]
+  }
+}

@@ -159,6 +159,14 @@ func TestResolveAmbiguous(t *testing.T) {
 	if !strings.Contains(err.Error(), "model_paths") {
 		t.Errorf("Resolve error = %q, want it to name model_paths", err)
 	}
+	// Listing several is now a working configuration, so the error offers it
+	// — ready to paste — rather than implying only one can be chosen.
+	if !strings.Contains(err.Error(), "one set") {
+		t.Errorf("Resolve error = %q, want it to say several files are assessed as one set", err)
+	}
+	if want := `model_paths = ["threatmodel/singular.tm.hcl", "threatmodels/plural.tm.hcl"]`; !strings.Contains(err.Error(), want) {
+		t.Errorf("Resolve error = %q, want it to offer %s", err, want)
+	}
 	for _, want := range []string{"singular.tm.hcl", "plural.tm.hcl"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Resolve error = %q, want it to list %s", err, want)

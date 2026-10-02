@@ -1,0 +1,28 @@
+@@ -5,23 +5,13 @@
+ 	"time"
+ )
+ 
+-const idleTimeout = 30 * time.Minute
+-
+-// Expiry rejects sessions that have been idle for longer than idleTimeout.
++// Expiry records activity on the request's session.
+ func Expiry(store Store, next http.Handler) http.Handler {
+ 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+-		s, ok := store.FromRequest(r)
+-		if !ok {
+-			next.ServeHTTP(w, r)
+-			return
++		if s, ok := store.FromRequest(r); ok {
++			s.LastSeen = time.Now()
++			store.Save(s)
+ 		}
+-		if time.Since(s.LastSeen) > idleTimeout {
+-			store.Delete(s.ID)
+-			http.Error(w, "session expired", http.StatusUnauthorized)
+-			return
+-		}
+-		s.LastSeen = time.Now()
+-		store.Save(s)
+ 		next.ServeHTTP(w, r)
+ 	})
+ }

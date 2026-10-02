@@ -195,7 +195,8 @@ repo root, or a single `*.hcl` under `threatmodels/` or `threatmodel/`, and
 uses the defaults below.
 
 ```hcl
-# Which model to assess. Required only when the repo has more than one.
+# Which model files to assess. Required only when the repo has more than one;
+# several are assessed together as one set (see below).
 model_paths = ["threatmodels/payments.hcl"]
 
 # Restrict the drift categories assessed. Omit to run all six.
@@ -245,8 +246,9 @@ workflow change, as long as the key is wired up.
 
 `anthropic` defaults to `claude-opus-5`, `openai` to `gpt-5.6-sol`, `gemini`
 to `gemini-3.8-flash`. All three are the models the committed finding-quality
-recordings were made against, on a corpus of one case per drift category plus
-a clean case that must stay clean, and all three agree on which cases are
+recordings were made against, on a corpus of one case per drift category, a
+clean case that must stay clean, and a threat model split across files — and
+all three agree on which cases are
 `action_required` — so `fail_mode` does not depend on which you pick.
 Overriding `model` is supported and sometimes right, but forced-JSON support
 varies by model, so an unverified one can fail the run after the diff has
@@ -262,6 +264,32 @@ API's `HIGH`, which is the highest it has.
 `max_tokens` bounds the model's output *including* its thinking. Too tight and
 the report is truncated mid-JSON, which the run reports as an error rather than
 rendering a half-written review.
+
+### Threat models split across files
+
+A threat model can span several files — dotted ids that namespace models into
+a hierarchy (`payments`, `payments.api`), and `extends`, which lets a model
+inherit another's threats and their controls, information assets, use cases,
+exclusions and third-party dependencies. List every file in `model_paths` and
+they are parsed and reviewed together as one set: one review, one comment.
+
+```hcl
+model_paths = [
+  "threatmodels/payments.tm.hcl",
+  "threatmodels/payments-api.tm.hcl", # extends "payments"
+]
+```
+
+- A model that `extends` another needs the parent's file in the same list;
+  naming only the child is an error that says so. Order does not matter.
+- Each item is reviewed once, under the model that declares it, so a finding
+  about an inherited control cites the parent's file — the one place to fix
+  it. The child's own section says what it inherits.
+- A multi-file set must be HCL. A single model may still be JSON.
+- Discovery never assembles a set on its own. If it finds several files and
+  `model_paths` is unset, the run fails and the error lists them, ready to
+  paste — two unrelated models reviewed together would make one large, muddled
+  review, so assessing them as a set is a choice you make here.
 
 ### What gets reviewed
 

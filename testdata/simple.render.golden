@@ -1,0 +1,24 @@
+Threat model file: simple.tm.hcl
+
+## Threat model "simple" (simple.tm.hcl:3)
+Minimal fixture exercising every drift-relevant block
+
+### Threats
+
+- threat "credential stuffing" (simple.tm.hcl:12)
+  description: Credential stuffing against the login endpoint
+  stride: Spoofing
+  impacts: Confidentiality
+  - control "login rate limiting" implemented=true (simple.tm.hcl:17)
+    description: Rate limiting middleware on POST /login
+
+### Information assets
+- information_asset "user credentials" classification=Restricted (simple.tm.hcl:7)
+  description: Usernames and bcrypt-hashed passwords in the users table
+
+### Third-party dependencies
+- third_party_dependency "identity provider" uptime_dependency=degraded (simple.tm.hcl:23)
+  description: Third-party IdP for SSO
+
+### Data flow diagrams
+(none)

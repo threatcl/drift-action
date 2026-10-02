@@ -52,13 +52,11 @@ func TestLoadInKeepsRelativeSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadIn: %v", err)
 	}
-	if a.Source != "simple.tm.hcl" {
-		t.Errorf("Source = %q, want the repo-relative path", a.Source)
+	if len(a.Sources) != 1 || a.Sources[0] != "simple.tm.hcl" {
+		t.Errorf("Sources = %q, want the repo-relative path", a.Sources)
 	}
-	if got := a.Lines.Path(); got != "simple.tm.hcl" {
-		t.Errorf("LineIndex.Path = %q, want the repo-relative path", got)
-	}
-	if got := a.Lines.Line("threatmodel", "simple"); got != 3 {
-		t.Errorf("line index should still work off the real file, got %d", got)
+	want := Location{File: "simple.tm.hcl", Line: 3}
+	if got := a.Lines.Locate("threatmodel", "simple"); got != want {
+		t.Errorf("Locate = %+v, want %+v: the index reads the real file and cites the repo-relative one", got, want)
 	}
 }

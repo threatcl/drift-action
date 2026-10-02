@@ -1,11 +1,13 @@
 // Package corpus runs the finding-quality corpus: paired threat models and
 // synthetic diffs with known expected findings, one case per drift category
-// plus a clean case. This is the suite that says whether the engine is any
-// good — everything else in the repo only says whether it runs.
+// plus a clean case, and a case whose threat model is a set split across
+// files. This is the suite that says whether the engine is any good —
+// everything else in the repo only says whether it runs.
 //
-// Expectations assert category and cited file, deliberately nothing else:
-// severity and exact line numbers both proved unstable across runs of the
-// same review.
+// Expectations assert category and cited code file — plus, where a case names
+// one, the model file the finding's excerpt cites — and deliberately nothing
+// else: severity and exact line numbers both proved unstable across runs of
+// the same review.
 //
 // TestCorpusAssembles always runs and is free — it proves every case parses
 // and assembles into a review request. TestCorpus runs inference and is
@@ -47,8 +49,8 @@ import (
 const modeEnv = "THREATCL_DRIFT_CORPUS"
 
 // providerEnv and modelEnv point the corpus at a provider other than the
-// default. A new provider earns its place by passing these same seven cases
-// under its own recordings, so the harness has to be able to run any of them
+// default. A new provider earns its place by passing these same cases under
+// its own recordings, so the harness has to be able to run any of them
 // — recordings are per provider and do not collide.
 //
 // modelEnv exists because a provider need not have a default model yet: a
@@ -126,9 +128,15 @@ type expectation struct {
 
 // expectedFinding names the one stable thing a finding must get right: what
 // kind of drift it is, and which file proves it.
+//
+// ModelFile, when set, also pins which threat model file the finding's
+// excerpt cites. Only a multi-file case has a wrong answer to that — citing a
+// child for a block its parent declares sends the fix to a file that does not
+// contain it — so single-file cases leave it empty.
 type expectedFinding struct {
 	Category     string `json:"category"`
 	EvidenceFile string `json:"evidence_file"`
+	ModelFile    string `json:"model_file"`
 }
 
 // changeSpec is one entry in a case's changes.json. The patch lives in a
@@ -199,19 +207,22 @@ func readChanges(t *testing.T, dir string) []diff.Change {
 }
 
 // assemble builds the review request for one case through the same code the
-// action runs: engine.FilterChanges and engine.AssembleRequest. Reproducing
-// either here is how the corpus previously came to measure a request the
-// action does not send.
+// action runs: engine.LoadModel, engine.FilterChanges and
+// engine.AssembleRequest. Reproducing any of them here is how the corpus
+// previously came to measure a request the action does not send.
+//
+// A case may carry workspace/.threatcl-ci.hcl, read as the action reads a
+// repo's. The multi-file case needs one: discovery refuses to guess between
+// several models, so a set is only ever assessed through model_paths.
 func assemble(t *testing.T, dir string) llm.ReviewRequest {
 	t.Helper()
-	cfg := config.Default()
 	workspace := filepath.Join(dir, "workspace")
 
-	paths, err := model.Resolve(workspace, nil)
+	cfg, err := config.Default().LoadFile(filepath.Join(workspace, config.DefaultConfigPath))
 	if err != nil {
-		t.Fatalf("resolving the threat model: %v", err)
+		t.Fatalf("loading the case's config: %v", err)
 	}
-	assertions, err := model.LoadIn(workspace, paths[0])
+	assertions, err := engine.LoadModel(workspace, cfg)
 	if err != nil {
 		t.Fatalf("loading the threat model: %v", err)
 	}
@@ -280,6 +291,10 @@ func TestCorpusAssembles(t *testing.T) {
 				if !strings.Contains(request.Diff, want.EvidenceFile) {
 					t.Errorf("the rendered diff never mentions %s, but the case expects a citation of it",
 						want.EvidenceFile)
+				}
+				if want.ModelFile != "" && !strings.Contains(request.ModelAssertions, "("+want.ModelFile+":") {
+					t.Errorf("the rendered assertions never cite %s, but the case expects a finding to",
+						want.ModelFile)
 				}
 			}
 			for _, want := range expected.ContextFiles {
@@ -353,8 +368,8 @@ func TestCorpus(t *testing.T) {
 }
 
 // recordingPath names one case's recording for one provider. Recordings are
-// per provider because each provider has to earn its place on the same seven
-// cases under its own recordings, and adding one must leave the Anthropic
+// per provider because each provider has to earn its place on the same cases
+// under its own recordings, and adding one must leave the Anthropic
 // baseline untouched.
 func recordingPath(dir, provider string) string {
 	return filepath.Join(dir, "recording."+provider+".json")
@@ -447,8 +462,12 @@ func assertExpectations(t *testing.T, expected expectation, report *findings.Rep
 	}
 	for _, want := range expected.Findings {
 		if !hasFinding(report, want) {
+			cites := want.EvidenceFile
+			if want.ModelFile != "" {
+				cites += " with a model excerpt from " + want.ModelFile
+			}
 			t.Errorf("no %s finding cites %s; the review produced: %s",
-				want.Category, want.EvidenceFile, describe(report))
+				want.Category, cites, describe(report))
 		}
 	}
 	// Extra findings are logged, never failed: over-reporting an adjacent
@@ -465,6 +484,9 @@ func hasFinding(report *findings.Report, want expectedFinding) bool {
 		if string(finding.Category) != want.Category {
 			continue
 		}
+		if want.ModelFile != "" && finding.ModelExcerpt.File != want.ModelFile {
+			continue
+		}
 		for _, evidence := range finding.Evidence {
 			if evidence.File == want.EvidenceFile {
 				return true
@@ -475,7 +497,7 @@ func hasFinding(report *findings.Report, want expectedFinding) bool {
 }
 
 // describe summarises a report for failure messages: every finding as
-// "category @ cited files".
+// "category @ cited files (model: excerpt file)".
 func describe(report *findings.Report) string {
 	if len(report.Findings) == 0 {
 		return "no findings"
@@ -486,7 +508,8 @@ func describe(report *findings.Report) string {
 		for _, evidence := range finding.Evidence {
 			files = append(files, evidence.File)
 		}
-		parts = append(parts, fmt.Sprintf("%s @ %s", finding.Category, strings.Join(files, ", ")))
+		parts = append(parts, fmt.Sprintf("%s @ %s (model: %s)",
+			finding.Category, strings.Join(files, ", "), or(finding.ModelExcerpt.File, "none")))
 	}
 	return strings.Join(parts, "; ")
 }

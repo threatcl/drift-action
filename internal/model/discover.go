@@ -50,10 +50,13 @@ func Discover(root string) ([]string, error) {
 	return found, nil
 }
 
-// Resolve picks the model to assess. Configured paths win outright. Otherwise
-// discovery must land on exactly one file: the claude-plugin asks the user
-// when a repo has several, and CI cannot, so guessing is refused in favour of
-// an error that names the fix.
+// Resolve picks the model files to assess. Configured paths win outright, and
+// several of them are assessed together as one set. Otherwise discovery must
+// land on exactly one file: the claude-plugin asks the user when a repo has
+// several, and CI cannot, so guessing is refused in favour of an error that
+// names the fix. Discovering several files does not make them one set — two
+// unrelated models assessed together would be one large, muddled review — so
+// assessing them together is the reader's choice, made in model_paths.
 func Resolve(root string, configured []string) ([]string, error) {
 	if len(configured) > 0 {
 		return configured, nil
@@ -69,8 +72,12 @@ func Resolve(root string, configured []string) ([]string, error) {
 	case 1:
 		return found, nil
 	default:
+		quoted := make([]string, len(found))
+		for i, path := range found {
+			quoted[i] = fmt.Sprintf("%q", filepath.ToSlash(path))
+		}
 		return nil, fmt.Errorf(
-			"found %d threat models (%s); set model_paths in .threatcl-ci.hcl to choose",
-			len(found), strings.Join(found, ", "))
+			"found %d threat models (%s); set model_paths in .threatcl-ci.hcl to choose one, or list several to assess them together as one set — model_paths = [%s] assesses them all",
+			len(found), strings.Join(found, ", "), strings.Join(quoted, ", "))
 	}
 }
