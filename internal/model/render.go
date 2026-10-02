@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -11,8 +12,11 @@ import (
 
 // Summary counts what the model asserts. It drives the "Context used" block,
 // which is rendered on every run so readers can judge the findings.
+//
+// Counts are over declared items: an item a model inherits through extends is
+// counted once, under the model that declares it.
 type Summary struct {
-	Path                string
+	Paths               []string
 	Names               []string
 	Threats             int
 	Controls            int
@@ -53,7 +57,7 @@ func plural(n int, noun string) string {
 
 // Summary counts the model's assertions.
 func (a *Assertions) Summary() Summary {
-	s := Summary{Path: a.Source}
+	s := Summary{Paths: slices.Clone(a.Sources)}
 	for _, tm := range a.Models() {
 		s.Names = append(s.Names, tm.Name)
 		s.Threats += len(tm.Threats)
@@ -85,13 +89,25 @@ func allControls(threat *spec.Threat) []*spec.Control {
 // Render writes the model's assertions as the THREAT MODEL ASSERTIONS section
 // of the drift prompt. Every assertion carries its file:line so the model can
 // cite it — a finding whose excerpt cannot be located is not verifiable.
+//
+// A single plain model renders exactly as it did before sets existed: the
+// rendered text is part of every corpus recording's request fingerprint, so
+// a change here for one-file repos stales every recording.
 func (a *Assertions) Render() string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Threat model file: %s\n", a.Source)
+	if len(a.Sources) > 1 {
+		b.WriteString("Threat model files, parsed together as one set:\n")
+		for _, source := range a.Sources {
+			fmt.Fprintf(&b, "- %s\n", source)
+		}
+	} else {
+		fmt.Fprintf(&b, "Threat model file: %s\n", strings.Join(a.Sources, ""))
+	}
 
 	for _, tm := range a.Models() {
 		fmt.Fprintf(&b, "\n## Threat model %q%s\n", tm.Name,
 			a.ref("threatmodel", tm.Name))
+		a.renderHierarchy(&b, tm)
 		if tm.Description != "" {
 			fmt.Fprintf(&b, "%s\n", strings.TrimSpace(tm.Description))
 		}
@@ -102,6 +118,44 @@ func (a *Assertions) Render() string {
 		a.renderDiagrams(&b, tm)
 	}
 	return b.String()
+}
+
+// renderHierarchy states a model's declared id and what it inherits, each
+// only when set. The assertions hold declared content only (see parse), so an
+// inherited item is rendered once, under its parent, with the parent's
+// citation — the one place a fix belongs. Without this line the reviewer
+// would read a child as asserting only what it declares.
+//
+// What is inherited mirrors spec's inheritFrom: collections, not data flow
+// diagrams.
+func (a *Assertions) renderHierarchy(b *strings.Builder, tm spec.Threatmodel) {
+	if tm.Id != "" {
+		fmt.Fprintf(b, "id: %s\n", tm.Id)
+	}
+	if tm.Extends == "" {
+		return
+	}
+
+	parent, transitive := tm.Extends, ""
+	if p, ok := a.modelByID(tm.Extends); ok {
+		if p.Name != tm.Extends {
+			parent = fmt.Sprintf("%s (threat model %q)", tm.Extends, p.Name)
+		}
+		if p.Extends != "" {
+			transitive = ", including what it inherits in turn"
+		}
+	}
+	fmt.Fprintf(b, "extends: %s — this model also asserts that model's threats and their controls, information assets, use cases, exclusions and third-party dependencies%s. They are listed under that model, not repeated here; an item declared here with the same name overrides the inherited one. Data flow diagrams are not inherited.\n",
+		parent, transitive)
+}
+
+func (a *Assertions) modelByID(id string) (spec.Threatmodel, bool) {
+	for _, tm := range a.Models() {
+		if tm.Id == id {
+			return tm, true
+		}
+	}
+	return spec.Threatmodel{}, false
 }
 
 func (a *Assertions) renderThreats(b *strings.Builder, tm spec.Threatmodel) {
@@ -241,13 +295,15 @@ func writeField(b *strings.Builder, label, value string) {
 }
 
 // ref renders " (payments.tm.hcl:84)" for an addressable block, or "" when the
-// line is unknown. Never emit ":0" — a fake citation is worse than none.
+// line is unknown. Never emit ":0" — a fake citation is worse than none. The
+// file is the one the block sits in, which across a set is not always the
+// file its model's other blocks are in.
 func (a *Assertions) ref(address ...string) string {
-	line := a.Lines.Line(address...)
-	if line == 0 {
+	loc := a.Lines.Locate(address...)
+	if loc.Line == 0 {
 		return ""
 	}
-	return fmt.Sprintf(" (%s:%d)", a.Source, line)
+	return fmt.Sprintf(" (%s:%d)", loc.File, loc.Line)
 }
 
 // pathPattern matches things in prose that look like repo paths: at least one

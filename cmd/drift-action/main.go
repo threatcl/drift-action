@@ -92,12 +92,15 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	assertions, err := loadModel(prCtx.Workspace, cfg)
+	assertions, err := engine.LoadModel(prCtx.Workspace, cfg)
+	if errors.Is(err, model.ErrNoModel) {
+		return skip("no threat model found in this repo; nothing to drift-check against")
+	}
 	if err != nil {
 		return err
 	}
 	summary := assertions.Summary()
-	log.Printf("threat model: %s (%s)", summary.Path, summary)
+	log.Printf("threat model: %s (%s)", strings.Join(summary.Paths, ", "), summary)
 
 	if cfg.DryRun {
 		log.Printf("dry run: the diff will be fetched and the comment rendered, but nothing will be posted")
@@ -193,22 +196,6 @@ func run(ctx context.Context) error {
 	return nil
 }
 
-func loadModel(workspace string, cfg config.Config) (*model.Assertions, error) {
-	paths, err := model.Resolve(workspace, cfg.ModelPaths)
-	if errors.Is(err, model.ErrNoModel) {
-		return nil, skip("no threat model found in this repo; nothing to drift-check against")
-	}
-	if err != nil {
-		return nil, err
-	}
-	if len(paths) > 1 {
-		return nil, fmt.Errorf(
-			"model_paths lists %d files; assessing multiple threat models in one run is not supported yet",
-			len(paths))
-	}
-	return model.LoadIn(workspace, paths[0])
-}
-
 // analysisInput is everything the review needs that the run has already
 // resolved.
 type analysisInput struct {
@@ -232,7 +219,7 @@ type analysisInput struct {
 // actually ran and judged the change consistent may set that flag.
 func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*findings.Report, render.ContextInfo) {
 	info := render.ContextInfo{
-		ModelPath:     in.summary.Path,
+		ModelPaths:    in.summary.Paths,
 		ModelSummary:  in.summary.String(),
 		FilesChanged:  len(in.comparison.Changes),
 		FilesReviewed: len(in.filtered.Kept),

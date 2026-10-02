@@ -1,0 +1,41 @@
+{
+  "recorded_at": "2026-10-02T11:17:47Z",
+  "source": "corpus/multi-file-set",
+  "model": "gpt-5.6-sol",
+  "request_digest": "3d50bbd7a5097eae1446c4332b9e28bc0d8fd346e54a22befecf585b28fcfb84",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "One action-required phantom control found: the implemented 30-minute idle-session-expiry control no longer rejects expired sessions.",
+    "findings": [
+      {
+        "category": "phantom_control",
+        "severity": "action_required",
+        "title": "Implemented idle-session-expiry control was removed",
+        "model_excerpt": {
+          "file": "threatmodels/storefront.tm.hcl",
+          "line": 18,
+          "quote": "Sessions idle for more than 30 minutes are rejected and the customer must sign in again, enforced on every request in internal/session/expiry.go"
+        },
+        "evidence": [
+          {
+            "file": "internal/session/expiry.go",
+            "line": 11,
+            "note": "The middleware now handles an existing session only by updating its LastSeen timestamp."
+          },
+          {
+            "file": "internal/session/expiry.go",
+            "line": 15,
+            "note": "Every request is forwarded to the next handler; there is no idle-time comparison, session deletion, or unauthorized response."
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The cited implementation is the exact file named by the implemented control, and the PR removes the behavior the control claims to enforce."
+        },
+        "agent_prompt": "Update threatmodels/storefront.tm.hcl in threat \"session hijacking\", control \"idle session expiry\": the control is marked implemented = true and claims sessions idle for more than 30 minutes are rejected, but internal/session/expiry.go:11-15 now only updates LastSeen and always forwards the request. Set implemented = false, or revise the control to point to a replacement implementation that enforces the 30-minute idle timeout.",
+        "suggested_fix": "Set control \"idle session expiry\" to implemented = false, or update it to reference a restored or replacement 30-minute idle-expiry implementation."
+      }
+    ]
+  }
+}

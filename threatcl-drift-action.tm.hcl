@@ -17,7 +17,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   information_asset "repository source code" {
-    description                = "Full contents of security-relevant repo files plus the PR diff, selected as context and transmitted to the LLM provider on every review"
+    description                = "Full contents of security-relevant repo files plus the PR diff, selected as context and transmitted to the LLM provider on every review, together with what every assessed threat model file declares — the files model_paths names in .threatcl-ci.hcl, configuration the pull request itself can edit, or the single file discovery finds"
     information_classification = "Confidential"
   }
 
@@ -37,7 +37,7 @@ threatmodel "threatcl-drift-action" {
 
   threat "Prompt injection via PR-controlled diff or context files" {
     ref         = "TCL-T-LLM-PROMPTINJ"
-    description = "A PR author embeds instructions or counterfeit section markers in the diff or in repo files selected as context (internal/llm/sections.go builds the prompt from both) to suppress drift findings or forge evidence citations that the evidence sanitizer cannot distinguish from real ones"
+    description = "A PR author embeds instructions or counterfeit section markers in any PR-controlled prompt input to suppress drift findings or forge evidence citations that the evidence sanitizer cannot distinguish from real ones. internal/llm/sections.go builds the prompt from three: the diff, the repo files selected as context, and the THREAT MODEL ASSERTIONS section, which internal/model/render.go renders from what the assessed threat model files declare — names, descriptions and implementation notes, read from the pull request's own checkout. Which files those are is PR-controlled as well: model_paths in the pull request's .threatcl-ci.hcl may list several, parsed by internal/model/model.go as one set. In that section names are quoted and field text is label-prefixed and indented, but a model's top-level description is rendered as-is, so its lines can begin with a counterfeit section marker; ids are held to identifier syntax by threatcl/spec, and the extends line is the engine's own wording. 'Schema-forced JSON and evidence sanitization' and 'Model output reaches only the report body' bound all three inputs alike. 'Threat model files are read only from inside the checkout', under the 'Repo source and diff shared with the LLM provider' threat, bounds only which files can be read, not what their prose says"
     impacts     = ["Integrity"]
     stride      = ["Tampering", "Spoofing"]
 
@@ -136,6 +136,12 @@ threatmodel "threatcl-drift-action" {
     description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the configured LLM provider as a condition of every review — the Anthropic API by default, or the OpenAI API or the Gemini API when llm.provider selects one, each recorded as its own third_party_dependency. The files chosen are exactly the ones that back the model's controls and threats, so the disclosure is targeted rather than incidental. Which third party receives it is a repository's own configuration choice, and nothing in the engine constrains that choice beyond the provider having to be one it implements"
     impacts     = ["Confidentiality"]
     stride      = ["Info Disclosure"]
+
+    control "Threat model files are read only from inside the checkout" {
+      description    = "model_paths is read from the pull request's own .threatcl-ci.hcl, so which model files are parsed, and whose declared content is rendered into the prompt, is PR-controlled. internal/model/model.go refuses an entry that is not a local relative path and reads every model file through an os.Root opened on the checkout, which also refuses a symlink resolving outside it — whether model_paths or discovery named the file, on both the single-file and multi-file routes. Not covered: including and imports inside a model are resolved by threatcl/spec, outside this check; and context stuffing has its own guard in internal/llm/context.go, which compares paths lexically and follows symlinks"
+      implemented    = true
+      risk_reduction = 20
+    }
   }
 
   threat "Coverage gap renders as a clean review" {
@@ -210,13 +216,13 @@ threatmodel "threatcl-drift-action" {
   }
 
   third_party_dependency "OpenAI API" {
-    description       = "The alternative inference provider, selected by llm.provider in .threatcl-ci.hcl. It receives exactly the same repository source excerpts and diff as the Anthropic API when configured, so the disclosure boundary is identical and only the recipient changes — a repository choosing it is choosing which third party sees its code. Not reached at all unless configured, but a hard dependency for any repository that does. It has earned that place rather than merely compiling: a parallel set of corpus recordings (testdata/corpus/*/recording.openai.json, gpt-5.6-sol) is committed for it, one per drift category plus the clean case, and all seven pass"
+    description       = "The alternative inference provider, selected by llm.provider in .threatcl-ci.hcl. It receives exactly the same repository source excerpts and diff as the Anthropic API when configured, so the disclosure boundary is identical and only the recipient changes — a repository choosing it is choosing which third party sees its code. Not reached at all unless configured, but a hard dependency for any repository that does. It has earned that place rather than merely compiling: a parallel set of corpus recordings (testdata/corpus/*/recording.openai.json, gpt-5.6-sol) is committed for it, one per drift category plus the clean case and a multi-file set, and all eight pass"
     saas              = true
     uptime_dependency = "hard"
   }
 
   third_party_dependency "Gemini API" {
-    description       = "The third inference provider, selected by llm.provider in .threatcl-ci.hcl. This is the Gemini Developer API at generativelanguage.googleapis.com, authenticated by API key — not Vertex AI, and internal/llm/gemini/gemini.go pins the backend explicitly so a GOOGLE_GENAI_USE_VERTEXAI variable in a runner's environment cannot reroute a review to a GCP project the workflow never named. It receives exactly the same repository source excerpts and diff as the other two when configured, so the disclosure boundary is identical and only the recipient changes. Not reached at all unless configured, but a hard dependency for any repository that does. It has earned its place the same way as the OpenAI API: a parallel set of corpus recordings (testdata/corpus/*/recording.gemini.json, gemini-3.8-flash) is committed for it, one per drift category plus the clean case, all seven pass, and it agrees with the other two providers on which cases are action_required — an agreement that required tightening the severity rule in prompts/drift-ci.md, because its first recording demoted confidential data egressing to an unmodeled external service"
+    description       = "The third inference provider, selected by llm.provider in .threatcl-ci.hcl. This is the Gemini Developer API at generativelanguage.googleapis.com, authenticated by API key — not Vertex AI, and internal/llm/gemini/gemini.go pins the backend explicitly so a GOOGLE_GENAI_USE_VERTEXAI variable in a runner's environment cannot reroute a review to a GCP project the workflow never named. It receives exactly the same repository source excerpts and diff as the other two when configured, so the disclosure boundary is identical and only the recipient changes. Not reached at all unless configured, but a hard dependency for any repository that does. It has earned its place the same way as the OpenAI API: a parallel set of corpus recordings (testdata/corpus/*/recording.gemini.json, gemini-3.8-flash) is committed for it, one per drift category plus the clean case and a multi-file set, all eight pass, and it agrees with the other two providers on which cases are action_required — an agreement that required tightening the severity rule in prompts/drift-ci.md, because its first recording demoted confidential data egressing to an unmodeled external service"
     saas              = true
     uptime_dependency = "hard"
   }

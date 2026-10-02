@@ -1,0 +1,12 @@
+{
+  "description": "The threat model is a set split across two files: a storefront platform model, and a checkout service in a second file that extends it. The platform declares idle session expiry as implemented in internal/session/expiry.go, and checkout inherits it. The diff guts the expiry check to an activity stamp, so the control is phantom for every service that inherits it. The finding has to cite the platform file, where the control is declared and the one place to fix it — not the checkout file that inherits it.",
+  "no_drift": false,
+  "context_files": ["internal/session/expiry.go"],
+  "findings": [
+    {
+      "category": "phantom_control",
+      "evidence_file": "internal/session/expiry.go",
+      "model_file": "threatmodels/storefront.tm.hcl"
+    }
+  ]
+}

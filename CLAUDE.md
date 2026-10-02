@@ -17,7 +17,9 @@ Deterministic first, inference second — facts are extracted before the model
 is asked anything.
 
 1. **Parse** the threat model via `threatcl/spec` into structured assertions,
-   with line numbers recovered separately. → `internal/model`
+   with file and line numbers recovered separately. A model split across
+   several files (`model_paths`) is parsed and reviewed as one set.
+   → `internal/model`
 2. **Fetch and filter** the diff from the GitHub compare API down to the
    review set. Nothing relevant changed → no inference at all.
    → `internal/diff`
@@ -59,8 +61,8 @@ is asked anything.
   pinned to `BackendGeminiAPI` in code so `GOOGLE_GENAI_USE_VERTEXAI` on a
   runner cannot reroute a review to a GCP project the workflow never named.
   Vertex, if wanted, is a separate provider with a separate credential story.
-- **2026-09:** A provider earns its default model by recording all seven
-  corpus cases *and* agreeing with the existing providers on which cases are
+- **2026-09:** A provider earns its default model by recording every corpus
+  case *and* agreeing with the existing providers on which cases are
   `action_required`. Gemini's first recording passed the assertions but
   demoted `dfd-drift`; the fix was to tighten the prompt's severity rule so
   every provider reads the exposure the same way, not to accept a
@@ -137,10 +139,48 @@ is asked anything.
   provider's corpus, not just editing the constant.
 - `threatcl/spec` discards source ranges: its structs carry no `hcl.Range` and
   its `hclparse.Parser` is never returned. `internal/model.LineIndex` re-parses
-  the file with `hclsyntax` to recover line numbers, and joins to spec's
-  structs by block type and label. Without it, `model_excerpt.file:line`
-  cannot be produced and the evidence rule is unenforceable. An unknown line
-  is 0 and must render as "no line", never as `:0`.
+  every file in the set with `hclsyntax` to recover locations, and joins to
+  spec's structs by block type and label. Without it, `model_excerpt.file:line`
+  cannot be produced and the evidence rule is unenforceable. Each entry stores
+  the *file* as well as the line, and citations take the file from the entry —
+  across a set, a block's model need not live in the file the block does, and a
+  citation naming a file that lacks the block is worse than none. The address
+  keys still work because spec makes threat model names unique across a set.
+  An unknown line is 0 and must render as "no line", never as `:0`.
+- `extends` is parsed twice. spec resolves it by copying the parent's
+  collections into the child, so rendering the resolved set showed every
+  inherited threat and control twice — the child's copy uncited, since the
+  block sits in the parent — and counted it twice in "Context used". The first
+  parse (resolution on) only validates: an unknown parent or a cycle fails
+  there. If any model has `Extends`, `model.parse` re-parses with
+  `SetSkipExtendsResolution(true)` and keeps *that* result, so each item is
+  rendered once, under the model that declares it, and the child carries an
+  `extends:` line saying what it inherits. Filtering the resolved result
+  instead does not work: `inheritFrom` copies by value and a same-named child
+  item overrides the parent's, so nothing distinguishes inherited from
+  overridden, and "has no line number" misfires on JSON and `including`. With
+  no `extends` there is no second parse. spec has no typed error for an
+  unknown parent, so `model.explain` matches its wording to add the
+  `model_paths` hint; `TestLoadChildAloneNamesTheFix` pins that wording.
+- One configured path stays on spec's `ParseFile`; only two or more go
+  through `ParseHCLRawSet`. That keeps single-file behaviour exactly as it was
+  — backend validation, JSON support — and keeps a plain one-file model's
+  `Render()` byte-identical, which every corpus recording's fingerprint
+  depends on (`TestRenderSingleFileUnchanged`, against
+  `testdata/simple.render.golden`; never regenerate it to make a test pass).
+  `ParseHCLRawSet` is HCL-only and skips `validateBackend`, so a JSON file in
+  a multi-file list is refused by name, and `NamedInput.Name` is the real
+  filesystem path because spec resolves `including` and imports against it.
+- Model files are read through an `os.Root` on the checkout
+  (`model.readConfined`), on both routes. `model_paths` comes from the pull
+  request's own `.threatcl-ci.hcl`, and what a model file declares is sent to
+  the LLM provider, so an entry that escapes — `../`, an absolute path, or a
+  symlink the PR adds — would let a PR pick a runner file to disclose. Escapes
+  are refused, never reinterpreted: `/threatmodels/x.hcl` is an error, not a
+  repo-relative path. `including`/imports inside a model resolve through spec
+  and are not confined; context stuffing's `readInWorkspace` is lexical only
+  and follows symlinks. Both residuals are recorded on the threat model's
+  `TCL-T-LLM-DATASHARE` control.
 - Both `claude-opus-5` and `claude-sonnet-5` carry elevated cybersecurity
   safeguards, and we send security-relevant diffs. A refusal arrives as
   HTTP 200 with `stop_reason: "refusal"` and possibly an empty content array —
@@ -173,10 +213,13 @@ is asked anything.
   outcomes with nothing in code to catch it — and although `fixture.Digest`
   excludes the prompt, a severity edit is a re-record-every-provider event in
   practice, because agreement on `action_required` is checked by eye.
-- `internal/engine` owns `NewProvider` and `AssembleRequest` because `main`
-  and the corpus must build the *same* request. They once didn't: the corpus
-  assembled its own and silently stopped setting `Categories`, so the corpus
-  measured a prompt the action never sent. It sits above `internal/llm`
+- `internal/engine` owns `NewProvider`, `LoadModel` and `AssembleRequest`
+  because `main` and the corpus must build the *same* request. They once
+  didn't: the corpus assembled its own and silently stopped setting
+  `Categories`, so the corpus measured a prompt the action never sent; and it
+  loaded only the first resolved model file while `main` refused several. A
+  corpus case may carry `workspace/.threatcl-ci.hcl`, read through
+  `config.LoadFile` as the action reads a repo's. It sits above `internal/llm`
   because the provider packages import `llm`, so `llm` cannot import them.
 - Provider settings cascade. `config.providerDefaults` is the single list of
   known providers (`knownProvider` reads it), and `Model`/`APIKeyEnv` are
@@ -214,7 +257,9 @@ is asked anything.
   collapse onto it rather than being rejected for one provider. Gemini 2.5
   models used `thinkingBudget` instead; the provider does not target them.
 - The corpus asserts category and cited file, never severity or primary
-  category — the two providers legitimately disagree there (on `dfd-drift`
+  category — plus, only where an expectation names `model_file`, the model
+  file the excerpt cites, which has a wrong answer only in a multi-file set.
+  The providers legitimately disagree on severity and primary category (on `dfd-drift`
   Anthropic leads with `unmodeled_surface`, OpenAI with `dfd_drift`) while
   agreeing on which cases are `action_required`. Tightening those assertions
   would break one provider for a difference that is judgement, not error.
@@ -254,7 +299,7 @@ check run wired to `fail_mode`, and `dry-run`.
 
 Three providers ship verified — Anthropic, OpenAI and Gemini
 (`internal/llm/gemini`, the Developer API by key, `gemini-3.8-flash`) — all
-recorded against the seven-case corpus and agreeing on which cases are
+recorded against all eight corpus cases and agreeing on which are
 `action_required`, so `fail_mode` does not depend on which one a repo picks.
 Gemini's agreement was won by tightening the prompt's severity rule; the
 Anthropic and OpenAI recordings predate that edit (the digest does not cover
@@ -265,6 +310,14 @@ is still owed.
 The corpus replay is CI's only finding-quality gate and fails closed both
 ways — though it replays only the default provider, so the OpenAI and Gemini
 recordings are not gated there.
+
+Multi-file threat model sets (issue #28) are implemented on the
+`multi-file-handling` branch and not yet released: several `model_paths` are
+one set, `extends` may cross files, and a hierarchy renders each item once.
+The eighth corpus case, `multi-file-set`, is recorded for all three
+providers, and all three agree: one `phantom_control`, `action_required`, its
+excerpt citing the parent file that declares the control rather than the
+child that inherits it.
 
 Dogfooding is live on this repo's own pull requests, and has already found
 real gaps in this repo's own threat model that the agent-prompt handoff then
@@ -284,8 +337,16 @@ v0.1.2 shipped; v1 is the next cut and the docs already name it.
   needs to write `.threatcl-ci.hcl` and a workflow with a `concurrency:`
   block, a pinned ref and `pull_request`. The threatcl editor LSP also flags
   `.threatcl-ci.hcl` as an invalid threat model — it should skip the file, as
-  engine discovery already does. Tracked in this repo because `/threat-ci` is
-  this action's on-ramp, but the work lands in `../claude-plugin`.
+  engine discovery already does. It should also emit a multi-entry
+  `model_paths` when a repo's model is split across files. Tracked in this
+  repo because `/threat-ci` is this action's on-ramp, but the work lands in
+  `../claude-plugin`.
+- Discovery that finds several files still refuses rather than assessing
+  them as a set; the error offers the `model_paths` line to paste. Whether
+  discovery should assemble a set itself (issue #28 leans that way, but two
+  unrelated models are only distinguishable from one split model after
+  parsing) is an open maintainer decision. Glob support in `model_paths` is
+  not implemented; if added, a glob matching nothing must be a hard error.
 - Spot-check Anthropic and OpenAI under the 2026-09 severity wording:
   `THREATCL_DRIFT_CORPUS=live THREATCL_DRIFT_CORPUS_PROVIDER=<p> <KEY>=… go
   test ./internal/corpus -run 'TestCorpus$/(dfd-drift|dependency-drift|unmodeled-surface)' -v`
@@ -295,7 +356,7 @@ v0.1.2 shipped; v1 is the next cut and the docs already name it.
   three providers would make the OpenAI and Gemini recordings a gate too.
 - Vertex, if ever, is a separate provider from Gemini — different credential
   (ADC/project, not an API key) and the `finishMessage` fields the Gemini API
-  drops. Same bar: all seven corpus cases under its own recordings, `clean`
+  drops. Same bar: every corpus case under its own recordings, `clean`
   included. `ReviewResult.Fallback` stays Anthropic-only — do not invent an
   equivalent.
 - A fork contributor who changes request assembly cannot re-record the corpus,

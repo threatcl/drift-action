@@ -21,7 +21,10 @@ const heading = "## Threat Drift Review by Threatcl"
 // every comment: findings are only as trustworthy as the context behind them,
 // and a reader cannot calibrate without seeing what was skipped.
 type ContextInfo struct {
-	ModelPath     string
+	// ModelPaths are the threat model files assessed, together as one set
+	// when there are several. Every one is listed: a reader cannot tell
+	// which parts of a split model were in scope otherwise.
+	ModelPaths    []string
 	ModelSummary  string
 	FilesChanged  int
 	FilesReviewed int
@@ -159,8 +162,13 @@ func writeVerdict(b *strings.Builder, report *findings.Report) {
 func writeContext(b *strings.Builder, info ContextInfo) {
 	b.WriteString("<details>\n<summary>Context used</summary>\n\n")
 
-	if info.ModelPath != "" {
-		fmt.Fprintf(b, "- ✅ Threat model: `%s`", info.ModelPath)
+	if len(info.ModelPaths) > 0 {
+		if len(info.ModelPaths) == 1 {
+			fmt.Fprintf(b, "- ✅ Threat model: `%s`", info.ModelPaths[0])
+		} else {
+			fmt.Fprintf(b, "- ✅ Threat model set, %d files: `%s`",
+				len(info.ModelPaths), strings.Join(info.ModelPaths, "`, `"))
+		}
 		if info.ModelSummary != "" {
 			fmt.Fprintf(b, " — %s", info.ModelSummary)
 		}

@@ -1,0 +1,46 @@
+{
+  "recorded_at": "2026-10-02T11:23:22Z",
+  "source": "corpus/multi-file-set",
+  "model": "claude-opus-5",
+  "request_digest": "3d50bbd7a5097eae1446c4332b9e28bc0d8fd346e54a22befecf585b28fcfb84",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "One action_required finding: the control 'idle session expiry' is still marked implemented = true but this PR deletes the 30-minute idle timeout enforcement from internal/session/expiry.go.",
+    "findings": [
+      {
+        "category": "phantom_control",
+        "severity": "action_required",
+        "title": "Control 'idle session expiry' is marked implemented but the timeout enforcement was deleted",
+        "model_excerpt": {
+          "file": "threatmodels/storefront.tm.hcl",
+          "line": 18,
+          "quote": "control \"idle session expiry\" implemented=true — Sessions idle for more than 30 minutes are rejected and the customer must sign in again, enforced on every request in internal/session/expiry.go"
+        },
+        "evidence": [
+          {
+            "file": "internal/session/expiry.go",
+            "line": 9,
+            "note": "Post-change Expiry middleware only refreshes LastSeen; no idle-timeout comparison, no session deletion, no 401 response remains"
+          },
+          {
+            "file": "internal/session/expiry.go",
+            "line": 12,
+            "note": "s.LastSeen = time.Now() is now unconditional, so an indefinitely idle session stays valid and is simply re-stamped on each request"
+          },
+          {
+            "file": "internal/session/expiry.go",
+            "line": 8,
+            "note": "Doc comment rewritten from 'rejects sessions that have been idle for longer than idleTimeout' to 'records activity on the request's session', and the idleTimeout constant (30 * time.Minute) was removed by this PR"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The model names this exact file as the enforcement point and the diff removes the entire enforcement branch, so the implemented = true claim is now false."
+        },
+        "agent_prompt": "In threatmodels/storefront.tm.hcl, threat \"session hijacking\" contains control \"idle session expiry\" with implemented = true and a description claiming \"Sessions idle for more than 30 minutes are rejected and the customer must sign in again, enforced on every request in internal/session/expiry.go\". This PR rewrote internal/session/expiry.go: the idleTimeout constant (30 * time.Minute), the time.Since(s.LastSeen) \u003e idleTimeout check, the store.Delete(s.ID) call and the 401 \"session expired\" response were all deleted; the middleware now only stamps s.LastSeen and calls next.ServeHTTP. Set implemented = false on that control and update its description to state that expiry is no longer enforced (the middleware only records last-seen activity), or, if expiry moved elsewhere, repoint the description at the new enforcement location and cite it. Leave the rest of the file unchanged.",
+        "suggested_fix": "Set implemented = false on control \"idle session expiry\" in threatmodels/storefront.tm.hcl and reword its description to drop the 30-minute rejection claim."
+      }
+    ]
+  }
+}
