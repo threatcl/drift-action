@@ -120,9 +120,9 @@ func run(ctx context.Context) error {
 		return err
 	}
 
-	filtered := engine.FilterChanges(cfg, assertions, comparison.Changes)
-	log.Printf("diff: %d changed files, %d to review (%d noise, %d narrowed out)",
-		len(comparison.Changes), len(filtered.Kept), filtered.Noise, filtered.NarrowedOut)
+	filtered := engine.FilterChanges(cfg, prCtx.Workspace, assertions, comparison.Changes)
+	log.Printf("diff: %d changed files, %d to review (%d noise, %d ignored, %d narrowed out)",
+		len(comparison.Changes), len(filtered.Kept), filtered.Noise, len(filtered.Ignored), filtered.NarrowedOut)
 
 	manifestFacts := deps.Facts(filtered.Kept)
 	log.Printf("dependency manifest changes: %d", len(manifestFacts))
@@ -224,12 +224,28 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 		FilesChanged:  len(in.comparison.Changes),
 		FilesReviewed: len(in.filtered.Kept),
 		NoiseDropped:  in.filtered.Noise,
+		Ignored:       len(in.filtered.Ignored),
 		Narrowed:      in.filtered.Narrowed,
 		NarrowedOut:   in.filtered.NarrowedOut,
 		PatchOmitted:  in.comparison.PatchOmitted,
 		// Everything filtered away is a coverage statement, not a clean bill
-		// of health — but a docs-only PR genuinely has no code to review.
-		NothingReviewed: len(in.filtered.Kept) == 0 && len(in.comparison.Changes) > in.filtered.Noise,
+		// of health — but a docs-only PR genuinely has no code to review, and
+		// neither does one touching only what the repo has excluded.
+		NothingReviewed: len(in.filtered.Kept) == 0 &&
+			len(in.comparison.Changes) > in.filtered.Noise+len(in.filtered.Ignored),
+	}
+	// Named, not just counted: neither reason shows in a file's path, and a
+	// header or an ignore_paths entry can each arrive in the pull request
+	// under review.
+	if len(in.filtered.Ignored) > 0 {
+		info.Notes = append(info.Notes, fmt.Sprintf(
+			"Ignored: %d file(s) excluded by `ignore_paths` — %s",
+			len(in.filtered.Ignored), summarise(in.filtered.Ignored)))
+	}
+	if len(in.filtered.Generated) > 0 {
+		info.Notes = append(info.Notes, fmt.Sprintf(
+			"Generated: %d Go file(s) skipped for a `Code generated … DO NOT EDIT.` header — %s",
+			len(in.filtered.Generated), summarise(in.filtered.Generated)))
 	}
 
 	if len(in.filtered.Kept) == 0 {

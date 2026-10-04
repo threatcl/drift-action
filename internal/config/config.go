@@ -76,6 +76,9 @@ type Config struct {
 	Categories []string
 	// TriggerPaths extend the built-in security-relevant path heuristic.
 	TriggerPaths []string
+	// IgnorePaths exclude files from review on top of the built-in noise
+	// rules. TriggerPaths win over them.
+	IgnorePaths []string
 	// FailMode decides the check-run conclusion policy.
 	FailMode string
 	// Provider and Model select the LLM backend.

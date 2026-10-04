@@ -155,6 +155,12 @@ threatmodel "threatcl-drift-action" {
       implemented    = true
       risk_reduction = 70
     }
+
+    control "Declared exclusions are named, not just counted" {
+      description    = "Two removals judge a file by something other than its name: a repo's ignore_paths in .threatcl-ci.hcl, and Go files carrying a generated-code header, which internal/diff/generated.go recognises with go/ast.IsGenerated, reading through an os.Root so a symlink out of the checkout is refused. cmd/drift-action/main.go lists every file each one removed, by path, in the comment's context block, and internal/render/comment.go counts ignore_paths exclusions on the Diff line apart from noise. Both run before the narrowing threshold is counted. internal/diff/pattern.go refuses at config load an ignore_paths entry that would match differently from how it reads (\"**\", negation, . or .. segments, bad glob syntax), and matches exclusions without the loose suffix rule that keep-side patterns use. In internal/diff/filter.go trigger_paths overrides an exclusion but the model's prose references do not, because they match loosely and would defeat it. These sit below the fold with ordinary noise rather than among the coverage warnings, because they are the same on every pull request rather than a gap this one hit. Residual: .threatcl-ci.hcl is read from the pull request's own tree, so a change can widen ignore_paths in the same commit that edits the files it then excludes, and a hand-written Go file escapes review by carrying the header line. Either is named in the comment, but only for a reader who opens the context block"
+      implemented    = true
+      risk_reduction = 30
+    }
   }
 
   threat "Replayed fixture impersonates a live review" {

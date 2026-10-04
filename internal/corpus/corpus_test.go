@@ -228,7 +228,7 @@ func assemble(t *testing.T, dir string) llm.ReviewRequest {
 	}
 
 	changes := readChanges(t, dir)
-	filtered := engine.FilterChanges(cfg, assertions, changes)
+	filtered := engine.FilterChanges(cfg, workspace, assertions, changes)
 	if len(filtered.Kept) == 0 {
 		t.Fatalf("the filter kept none of the case's %d change(s); the review would assess nothing", len(changes))
 	}

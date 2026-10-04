@@ -114,7 +114,15 @@ is asked anything.
   zero files. Under-reviewing yields a clean-looking result that hides drift,
   the worst outcome this action has, so never tighten the filter without a
   matching coverage report: narrowing and an empty review set must both reach
-  the comment.
+  the comment. The two content-based removals follow that rule. A repo's
+  `ignore_paths` lists every file it excludes by path. Go files carrying a
+  `// Code generated … DO NOT EDIT.` header (`diff.GoGenerated`, stdlib
+  `ast.IsGenerated`, read through an `os.Root`) are noise and are listed too.
+  Precedence is deliberate: `trigger_paths` beats `ignore_paths`, but the
+  model's prose references do not. They match loosely through the keep-side
+  suffix rule, so a bare `server.go` would defeat every exclusion. That suffix
+  rule lives in `matchesAny` only. `ignores` gets the pattern language alone,
+  because an exclusion must remove exactly what it names.
 
 ## Gotchas
 

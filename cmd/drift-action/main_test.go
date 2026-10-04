@@ -8,6 +8,7 @@ import (
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/diff"
 	"github.com/threatcl/drift-action/internal/gh"
+	"github.com/threatcl/drift-action/internal/render"
 )
 
 // Over max_diff_files the run must refuse before any provider is built: no
@@ -36,6 +37,46 @@ func TestAnalyzeRefusesOverCap(t *testing.T) {
 	}
 	if got := verdict(report, 0); got != verdictUnassessed {
 		t.Errorf("verdict = %q, want %q", got, verdictUnassessed)
+	}
+}
+
+// A pull request touching only what the repo excluded has nothing to review,
+// like a docs-only one: no coverage warning above the fold. But what was
+// excluded is still named in the comment, because neither an ignore_paths
+// entry nor a generated header shows in a file's path.
+func TestAnalyzeNamesExcludedFiles(t *testing.T) {
+	cfg := config.Default()
+	t.Setenv(replayEnv, "")
+	t.Setenv(cfg.APIKeyEnv, "")
+
+	changes := []diff.Change{{Path: "gen/a.go"}, {Path: "db/queries.go"}, {Path: "README.md"}}
+	report, info := analyze(context.Background(), cfg, analysisInput{
+		filtered: diff.Result{
+			Noise:     2,
+			Generated: []string{"db/queries.go"},
+			Ignored:   []string{"gen/a.go"},
+		},
+		comparison: &gh.CompareResult{Changes: changes},
+	})
+
+	if info.NothingReviewed {
+		t.Error("NothingReviewed set for a pull request touching only noise and excluded files")
+	}
+	if info.Ignored != 1 {
+		t.Errorf("Ignored = %d, want 1", info.Ignored)
+	}
+	body := render.Comment(report, info)
+	for _, want := range []string{
+		"(2 skipped as docs, lock files, vendored or generated; 1 excluded by `ignore_paths`)",
+		"Ignored: 1 file(s) excluded by `ignore_paths` — `gen/a.go`",
+		"Generated: 1 Go file(s) skipped for a `Code generated … DO NOT EDIT.` header — `db/queries.go`",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("comment missing %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "No drift detected") {
+		t.Errorf("a run that reviewed nothing must not read as clean:\n%s", body)
 	}
 }
 

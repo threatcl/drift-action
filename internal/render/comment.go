@@ -31,6 +31,10 @@ type ContextInfo struct {
 	// NoiseDropped counts documentation, lock files, vendored and generated
 	// content removed before review.
 	NoiseDropped int
+	// Ignored counts files the repo's ignore_paths excluded. Like noise it is
+	// the same on every pull request rather than a gap this one hit, so it
+	// renders in the context block, with the paths themselves in Notes.
+	Ignored int
 	// Narrowed and NarrowedOut report that the diff was too large to review
 	// whole and was cut to security-relevant paths — a coverage gap the
 	// reader has to see.
@@ -182,8 +186,15 @@ func writeContext(b *strings.Builder, info ContextInfo) {
 		}
 		fmt.Fprintf(b, "- 📄 Diff: %d of %d changed files %s",
 			info.FilesReviewed, info.FilesChanged, verb)
+		var skipped []string
 		if info.NoiseDropped > 0 {
-			fmt.Fprintf(b, " (%d skipped as docs, lock files, vendored or generated)", info.NoiseDropped)
+			skipped = append(skipped, fmt.Sprintf("%d skipped as docs, lock files, vendored or generated", info.NoiseDropped))
+		}
+		if info.Ignored > 0 {
+			skipped = append(skipped, fmt.Sprintf("%d excluded by `ignore_paths`", info.Ignored))
+		}
+		if len(skipped) > 0 {
+			fmt.Fprintf(b, " (%s)", strings.Join(skipped, "; "))
 		}
 		b.WriteString("\n")
 	}

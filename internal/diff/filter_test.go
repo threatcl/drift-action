@@ -142,8 +142,8 @@ func TestExtraPatternsSurviveNarrowing(t *testing.T) {
 	}
 
 	result := Filter(changes, Options{
-		NarrowAbove:   5,
-		ExtraPatterns: []string{"widgets/wa.go"},
+		NarrowAbove: 5,
+		References:  []string{"widgets/wa.go"},
 	})
 
 	found := map[string]bool{}
@@ -179,9 +179,108 @@ func TestExtraPatternForms(t *testing.T) {
 // is still honoured.
 func TestExtraPatternRescuesNoise(t *testing.T) {
 	result := Filter(changesFor("docs/threat-notes.md", "main.go"), Options{
-		ExtraPatterns: []string{"docs/threat-notes.md"},
+		TriggerPatterns: []string{"docs/threat-notes.md"},
 	})
 	if len(result.Kept) != 2 {
 		t.Errorf("kept %v, want the explicitly named doc plus main.go", paths(result.Kept))
+	}
+}
+
+func TestIgnorePatternsExclude(t *testing.T) {
+	result := Filter(changesFor(
+		"server/server.go",
+		"generated/client.go",
+		"generated/README.md",
+		"examples/shop/package.json",
+	), Options{IgnorePatterns: []string{"generated/", "examples/"}})
+
+	kept(t, result, "server/server.go")
+	// A file that was noise anyway counts as noise: Ignored names only what
+	// the exclusion itself took out.
+	if result.Noise != 1 {
+		t.Errorf("Noise = %d, want 1 (the README)", result.Noise)
+	}
+	// A manifest is never noise, but an explicit exclusion still reaches it.
+	if got := result.Ignored; len(got) != 2 || got[0] != "generated/client.go" || got[1] != "examples/shop/package.json" {
+		t.Errorf("Ignored = %v, want the client and the example manifest", got)
+	}
+}
+
+// trigger_paths is "always review", so it beats an exclusion — which is also
+// how a repo carves an exception out of an ignored directory. The model's
+// prose references do not: they match loosely, and a bare "client.go" would
+// defeat the exclusion everywhere.
+func TestTriggerBeatsIgnoreButReferencesDoNot(t *testing.T) {
+	result := Filter(changesFor(
+		"generated/routes.go",
+		"generated/client.go",
+	), Options{
+		IgnorePatterns:  []string{"generated/"},
+		TriggerPatterns: []string{"generated/routes.go"},
+		References:      []string{"client.go"},
+	})
+
+	kept(t, result, "generated/routes.go")
+	if len(result.Ignored) != 1 || result.Ignored[0] != "generated/client.go" {
+		t.Errorf("Ignored = %v, want the referenced-but-ignored client", result.Ignored)
+	}
+}
+
+// Excluded files are gone before the narrowing threshold is counted, so a
+// diff that is mostly generated code is reviewed whole rather than narrowed.
+func TestIgnoredFilesDoNotCountTowardsNarrowing(t *testing.T) {
+	changes := changesFor("widgets/handler.go", "widgets/view.go")
+	for i := range 20 {
+		changes = append(changes, Change{Path: "gen/m" + string(rune('a'+i)) + ".go"})
+	}
+
+	result := Filter(changes, Options{NarrowAbove: 5, IgnorePatterns: []string{"gen/"}})
+
+	if result.Narrowed {
+		t.Errorf("narrowed with only two reviewable files: kept %v", paths(result.Kept))
+	}
+	kept(t, result, "widgets/handler.go", "widgets/view.go")
+	if len(result.Ignored) != 20 {
+		t.Errorf("Ignored %d files, want 20", len(result.Ignored))
+	}
+}
+
+func TestGeneratedHeaderIsNoise(t *testing.T) {
+	header := map[string]bool{
+		"db/queries.go":   true,
+		"mocks/store.go":  true,
+		"api/handlers.go": true,
+	}
+	var asked []string
+	result := Filter(changesFor(
+		"db/queries.go",
+		"mocks/store.go",
+		"api/handlers.go",
+		"auth/session.go",
+		"docs/guide.md",
+		"gen/thing.go",
+	), Options{
+		// Named by the model's prose, so reviewed whatever its header says.
+		References:     []string{"api/handlers.go"},
+		IgnorePatterns: []string{"gen/"},
+		Generated: func(p string) bool {
+			asked = append(asked, p)
+			return header[p]
+		},
+	})
+
+	kept(t, result, "api/handlers.go", "auth/session.go")
+	if result.Noise != 3 {
+		t.Errorf("Noise = %d, want 3 (two generated, one doc)", result.Noise)
+	}
+	if got := result.Generated; len(got) != 2 || got[0] != "db/queries.go" || got[1] != "mocks/store.go" {
+		t.Errorf("Generated = %v, want the two header-marked files", got)
+	}
+	// The header check reads the file, so it runs last: never for a file
+	// already settled by name, by exclusion, or by the model naming it.
+	for _, p := range asked {
+		if p == "docs/guide.md" || p == "gen/thing.go" || p == "api/handlers.go" {
+			t.Errorf("header check ran for %s, which was already settled", p)
+		}
 	}
 }

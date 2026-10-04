@@ -10,6 +10,8 @@ import (
 
 	"github.com/hashicorp/hcl/v2/gohcl"
 	"github.com/hashicorp/hcl/v2/hclparse"
+
+	"github.com/threatcl/drift-action/internal/diff"
 )
 
 // fileConfig mirrors the .threatcl-ci.hcl schema. Every field is optional so
@@ -18,6 +20,7 @@ type fileConfig struct {
 	ModelPaths   []string     `hcl:"model_paths,optional"`
 	Categories   []string     `hcl:"categories,optional"`
 	TriggerPaths []string     `hcl:"trigger_paths,optional"`
+	IgnorePaths  []string     `hcl:"ignore_paths,optional"`
 	FailMode     string       `hcl:"fail_mode,optional"`
 	LLM          *llmBlock    `hcl:"llm,block"`
 	Limits       *limitsBlock `hcl:"limits,block"`
@@ -78,6 +81,17 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 	}
 	if len(fc.TriggerPaths) > 0 {
 		c.TriggerPaths = fc.TriggerPaths
+	}
+	if len(fc.IgnorePaths) > 0 {
+		// Checked here rather than left to match nothing: an exclusion that
+		// silently does something other than it reads is a coverage gap
+		// nobody chose.
+		for _, pattern := range fc.IgnorePaths {
+			if err := diff.ValidatePattern(pattern); err != nil {
+				return c, fmt.Errorf("%s: ignore_paths: %w", path, err)
+			}
+		}
+		c.IgnorePaths = fc.IgnorePaths
 	}
 	if fc.FailMode != "" {
 		if fc.FailMode != FailNever && fc.FailMode != FailOnActionRequired {
