@@ -202,10 +202,13 @@ model_paths = ["threatmodels/payments.hcl"]
 # Restrict the drift categories assessed. Omit to run all six.
 categories = ["phantom_control", "stale_assertion", "dependency_drift"]
 
-# Paths that must always be reviewed, even when a large diff is narrowed.
-# A trailing slash matches by prefix; otherwise the pattern is matched with
-# path.Match, and a bare filename matches wherever it sits in the tree.
+# Paths that must always be reviewed, even when a large diff is narrowed or
+# ignore_paths would exclude them. Pattern syntax is under "What gets reviewed".
 trigger_paths = ["src/payments/", "cmd/*.go"]
+
+# Paths never to review: code you know cannot carry drift, such as generated
+# clients or example apps. Each excluded file is named in the comment.
+ignore_paths = ["generated/", "*_gen.go", "examples/"]
 
 # never (default) | on-action-required
 fail_mode = "never"
@@ -228,7 +231,8 @@ limits {
 
 An unknown category, fail mode, effort level or provider is a hard error
 rather than a silent default, so a typo can never quietly disable a drift
-check or fail the request after the diff has already been fetched.
+check or fail the request after the diff has already been fetched. So is an
+`ignore_paths` pattern that would not match the way it reads.
 
 `model` and `api_key_env` follow from `provider` when you do not set them, so
 selecting a provider is usually all you need:
@@ -293,12 +297,23 @@ model_paths = [
 
 ### What gets reviewed
 
-Two rules decide which changed files reach the review, and the comment always
-reports the outcome of both.
+Three rules decide which changed files reach the review, and the comment always
+reports the outcome of each.
 
 Documentation, lock files, images, and vendored or generated code are always
-skipped — they cannot carry threat model drift. Dependency manifests
-(`go.mod`, `package.json`, …) are never skipped, whatever else the rules say.
+skipped — they cannot carry threat model drift. Generated code is recognised
+by name (`.pb.go`, `_generated.go`, …) and, for Go, by the standard
+`// Code generated … DO NOT EDIT.` header, the same one `go vet` and `gopls`
+honour. The comment lists every Go file skipped for its header, since nothing
+in the file's name says why. Dependency manifests (`go.mod`, `package.json`,
+…) are never skipped by these rules.
+
+`ignore_paths` excludes whatever else you name, manifests included. The
+comment lists every file it excluded. A file that `trigger_paths` also names
+is reviewed anyway, which is how you carve an exception out of an excluded
+directory. A path your threat model's prose mentions is *not* exempt, because
+prose cites paths loosely and a mention of `server.go` would otherwise defeat
+`ignore_paths = ["generated/"]` wherever a generated `server.go` sits.
 
 Everything else is reviewed. Only when a diff exceeds `narrow_above` files is
 it cut down to security-relevant paths to stay within budget, and when that
@@ -312,7 +327,25 @@ to run `/threat-drift` locally with the [threatcl
 claude-plugin](https://github.com/threatcl/claude-plugin), the check run stays
 neutral, and the verdict is `unassessed`. The cap is deliberately
 all-or-nothing — reviewing the first 200 files of a 500-file diff would
-present partial coverage as a review.
+present partial coverage as a review. Excluded and generated files are removed
+before either count, so a diff that is mostly generated code is not narrowed
+on its account.
+
+`trigger_paths` and `ignore_paths` share one pattern syntax, modelled on
+`.gitignore`:
+
+| Pattern | Matches |
+|---|---|
+| `generated/` | every file under any directory named `generated`, at any depth |
+| `internal/gen/` | every file under that directory — a slash before the end anchors it at the repo root |
+| `services/*/gen/` | the same, with `*` matching within one path segment |
+| `*_gen.go` | any file with a matching name, at any depth |
+| `cmd/*.go` | files matching from the repo root; `*` does not cross `/` |
+| `/Makefile` | a leading slash anchors a pattern that would otherwise match anywhere |
+
+`**` and `!` negation are not supported, and `ignore_paths` refuses them — and
+`./` or `..` segments — rather than silently matching something else. To
+review a file inside an excluded directory, name it in `trigger_paths`.
 
 ## Security notes
 

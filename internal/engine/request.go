@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"slices"
+	"os"
 
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/deps"
@@ -12,18 +12,27 @@ import (
 	"github.com/threatcl/drift-action/prompts"
 )
 
-// FilterChanges reduces a pull request's changes to the review set. The extra
-// patterns are what survives narrowing on top of the security-relevant
-// defaults: paths the threat model's prose names, and the repo's configured
-// trigger_paths.
+// FilterChanges reduces a pull request's changes to the review set. What
+// survives noise and narrowing on top of the security-relevant defaults is the
+// repo's trigger_paths and the paths the threat model's prose names; what the
+// repo's ignore_paths names is removed first, unless trigger_paths names it
+// too.
 //
-// slices.Concat rather than append: appending to cfg.TriggerPaths would write
-// through to its backing array whenever it has spare capacity.
-func FilterChanges(cfg config.Config, assertions *model.Assertions, changes []diff.Change) diff.Result {
-	return diff.Filter(changes, diff.Options{
-		ExtraPatterns: slices.Concat(cfg.TriggerPaths, assertions.ReferencedPaths()),
-		NarrowAbove:   cfg.NarrowAbove,
-	})
+// The checkout at workspace is read only to recognise generated Go files by
+// their header. If it cannot be opened, every file is judged by name alone,
+// which keeps more in review rather than less.
+func FilterChanges(cfg config.Config, workspace string, assertions *model.Assertions, changes []diff.Change) diff.Result {
+	opts := diff.Options{
+		TriggerPatterns: cfg.TriggerPaths,
+		References:      assertions.ReferencedPaths(),
+		IgnorePatterns:  cfg.IgnorePaths,
+		NarrowAbove:     cfg.NarrowAbove,
+	}
+	if root, err := os.OpenRoot(workspace); err == nil {
+		defer func() { _ = root.Close() }()
+		opts.Generated = diff.GoGenerated(root)
+	}
+	return diff.Filter(changes, opts)
 }
 
 // RequestInput is what assembling a review request needs beyond the config:

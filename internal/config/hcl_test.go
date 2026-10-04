@@ -21,6 +21,7 @@ func TestLoadFileOverlays(t *testing.T) {
 model_paths   = ["threatmodels/payments.hcl"]
 categories    = ["phantom_control", "dependency_drift"]
 trigger_paths = ["src/payments/"]
+ignore_paths  = ["generated/", "*_gen.go"]
 fail_mode     = "on-action-required"
 
 llm {
@@ -41,6 +42,9 @@ limits {
 
 	if len(cfg.ModelPaths) != 1 || cfg.ModelPaths[0] != "threatmodels/payments.hcl" {
 		t.Errorf("ModelPaths = %v", cfg.ModelPaths)
+	}
+	if len(cfg.IgnorePaths) != 2 || cfg.IgnorePaths[1] != "*_gen.go" {
+		t.Errorf("IgnorePaths = %v", cfg.IgnorePaths)
 	}
 	if cfg.FailMode != FailOnActionRequired {
 		t.Errorf("FailMode = %q", cfg.FailMode)
@@ -82,6 +86,9 @@ func TestLoadFileRejectsBadValues(t *testing.T) {
 		// case is a provider the engine has no implementation for.
 		{"unknown provider", `llm { provider = "vertex" }`, "llm.provider must be"},
 		{"bad effort", `llm { effort = "extreme" }`, "llm.effort must be"},
+		// path.Match reads "**" as two stars, so this would silently match
+		// one directory level instead of every one.
+		{"unsupported ignore pattern", `ignore_paths = ["**/generated/"]`, "ignore_paths"},
 		{"malformed hcl", `fail_mode = `, "parsing"},
 		{"unknown attribute", `not_a_setting = true`, "decoding"},
 	}
