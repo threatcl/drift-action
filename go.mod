@@ -9,7 +9,7 @@ require (
 	github.com/openai/openai-go/v3 v3.68.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/threatcl/spec v0.8.1
-	google.golang.org/genai v1.71.0
+	google.golang.org/genai v1.72.0
 )
 
 require (
