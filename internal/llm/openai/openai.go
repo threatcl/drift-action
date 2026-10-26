@@ -176,12 +176,15 @@ func (c *Client) Review(ctx context.Context, req llm.ReviewRequest) (*llm.Review
 		return nil, fmt.Errorf("the model returned no output (status %q)", final.Status)
 	}
 
-	report, err := findings.Parse([]byte(text))
+	// Validated against the schema this request carried, not a fixed one: a
+	// cloud-mode answer must carry library_refs and a local-mode one must not.
+	report, err := findings.ParseWith(req.Schema, []byte(text))
 	if err != nil {
 		return nil, err
 	}
 
 	return &llm.ReviewResult{
+		Raw:    []byte(text),
 		Report: report,
 		Model:  final.Model,
 		// No Fallback: this API has no server-side fallback equivalent, and

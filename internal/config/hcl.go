@@ -24,6 +24,16 @@ type fileConfig struct {
 	FailMode     string       `hcl:"fail_mode,optional"`
 	LLM          *llmBlock    `hcl:"llm,block"`
 	Limits       *limitsBlock `hcl:"limits,block"`
+	Cloud        *cloudBlock  `hcl:"cloud,block"`
+}
+
+// cloudBlock deliberately has no api_url: gohcl refuses an attribute the
+// struct does not declare, which is what keeps a pull request from pointing
+// the organisation's token at a host of its choosing. TestCloudBlockRefusesURL
+// pins that.
+type cloudBlock struct {
+	Model          string `hcl:"model,optional"`
+	PolicyFailMode string `hcl:"policy_fail_mode,optional"`
 }
 
 type llmBlock struct {
@@ -142,6 +152,19 @@ func (c Config) apply(fc fileConfig, path string) (Config, error) {
 		}
 		if fc.Limits.NarrowAbove > 0 {
 			c.NarrowAbove = fc.Limits.NarrowAbove
+		}
+	}
+	if fc.Cloud != nil {
+		c.Cloud.Declared = true
+		c.Cloud.Model = fc.Cloud.Model
+		if fc.Cloud.PolicyFailMode != "" {
+			// Someone who believes their pull requests are policy-gated must
+			// never be quietly ungated by a typo, exactly as for fail_mode.
+			if fc.Cloud.PolicyFailMode != PolicyFailNever && fc.Cloud.PolicyFailMode != PolicyFailOnEnforcedViolation {
+				return c, fmt.Errorf("%s: cloud.policy_fail_mode must be %q or %q, got %q",
+					path, PolicyFailNever, PolicyFailOnEnforcedViolation, fc.Cloud.PolicyFailMode)
+			}
+			c.Cloud.PolicyFailMode = fc.Cloud.PolicyFailMode
 		}
 	}
 	return c, nil

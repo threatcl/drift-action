@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "repository": "github.com/acme/payments",
+  "pr_number": 412,
+  "head_sha": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b",
+  "base_sha": "2c26b46b68ffc68ff99b453c1d30413413422d70",
+  "models": [
+    {"id": "0b9c6f1e-4d2a-4c3b-9e8f-1a2b3c4d5e6f", "version": "1.0.6", "alignment": "ahead", "versions_behind": 0},
+    {"id": "2d1e8f30-6f4c-4e5d-9a0b-3c4d5e6f7081", "version": "1.0.6", "alignment": "behind", "versions_behind": 2},
+    {"id": null, "version": null, "alignment": "not_in_cloud", "versions_behind": 0}
+  ],
+  "verdict": "action-required",
+  "counts": {
+    "stale_assertion": 1,
+    "phantom_control": 0,
+    "unmodeled_surface": 2,
+    "dfd_drift": 0,
+    "dependency_drift": 1,
+    "unclassified_data": 0
+  },
+  "action_required_count": 1,
+  "policy": {"evaluated": 3, "violated": 1, "blocking": 1},
+  "files_changed": 14,
+  "files_reviewed": 9,
+  "provider": "anthropic",
+  "llm_model": "claude-sonnet-5-5",
+  "action_version": "v1.2.0"
+}

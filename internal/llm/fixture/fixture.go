@@ -79,9 +79,16 @@ func (r *Recorder) Review(ctx context.Context, req llm.ReviewRequest) (*llm.Revi
 }
 
 func (r *Recorder) write(req llm.ReviewRequest, result *llm.ReviewResult) error {
-	report, err := json.Marshal(result.Report)
-	if err != nil {
-		return err
+	// The provider's output as validated, when there is one: a
+	// re-serialisation of the parsed struct would drop an empty library_refs
+	// through omitempty and fail the cloud schema on replay.
+	report := json.RawMessage(result.Raw)
+	if len(report) == 0 {
+		var err error
+		report, err = json.Marshal(result.Report)
+		if err != nil {
+			return err
+		}
 	}
 
 	raw, err := json.MarshalIndent(Recording{
@@ -122,16 +129,19 @@ func (p *Player) Review(_ context.Context, req llm.ReviewRequest) (*llm.ReviewRe
 		return nil, fmt.Errorf("parsing the recording at %s: %w", p.path, err)
 	}
 
-	// Validate on the way out, exactly as a live response would be. A hand
-	// edited fixture must not be able to put anything past the schema that a
-	// model could not.
-	report, err := findings.Parse(recording.Report)
+	// Validate on the way out, exactly as a live response would be, against
+	// the schema this request carries. A hand edited fixture must not be able
+	// to put anything past the schema that a model could not, and a local-mode
+	// recording replayed into a cloud-mode request (or the reverse) fails
+	// here rather than rendering under the wrong rules.
+	report, err := findings.ParseWith(req.Schema, recording.Report)
 	if err != nil {
 		return nil, fmt.Errorf("the recording at %s holds an invalid report: %w", p.path, err)
 	}
 
 	result := &llm.ReviewResult{
 		Report:   report,
+		Raw:      recording.Report,
 		Model:    recording.Model,
 		Fallback: recording.Fallback,
 	}

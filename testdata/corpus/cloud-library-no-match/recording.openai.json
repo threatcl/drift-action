@@ -1,0 +1,42 @@
+{
+  "recorded_at": "2026-10-26T08:07:54Z",
+  "source": "corpus/cloud-library-no-match",
+  "model": "gpt-5.6-sol",
+  "request_digest": "717468ac2382f2aceb584a7292397bcd1600b6aca7c64dbf2186dfb8cca33f9b",
+  "report": {
+    "findings": [
+      {
+        "agent_prompt": "Update app.tm.hcl in threat \"credential database theft\": replace the description's claim that passwords are hashed with bcrypt at cost 12 with the current Argon2id implementation and parameters in internal/auth/password.go:18 (16-byte random salt, time 1, memory 64 MiB, parallelism 4, 32-byte key). Keep control \"password hashing\" implemented = true, but clarify its description to identify Argon2id. No organisation library entry applies.",
+        "category": "stale_assertion",
+        "evidence": [
+          {
+            "file": "internal/auth/password.go",
+            "line": 18,
+            "note": "HashPassword now derives password hashes with argon2.IDKey rather than bcrypt."
+          },
+          {
+            "file": "internal/auth/password.go",
+            "line": 37,
+            "note": "VerifyPassword also derives an Argon2id key using the stored salt and current parameters."
+          }
+        ],
+        "library_refs": [],
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 12,
+          "quote": "An attacker who obtains the users table cracks password hashes offline. Passwords are hashed with bcrypt at cost 12 in internal/auth/password.go, which keeps offline cracking expensive."
+        },
+        "relevance": {
+          "justification": "The changed implementation directly contradicts the model's concrete claim that password hashing uses bcrypt at cost 12.",
+          "rating": "strong"
+        },
+        "severity": "action_required",
+        "suggested_fix": "Replace the bcrypt cost-12 assertion with the Argon2id algorithm and parameters currently used in internal/auth/password.go.",
+        "title": "Password-hashing algorithm assertion is stale"
+      }
+    ],
+    "no_drift": false,
+    "schema_version": "0.1",
+    "summary": "One action-required stale assertion found: the model claims bcrypt at cost 12, but password hashing now uses Argon2id."
+  }
+}

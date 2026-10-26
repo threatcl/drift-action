@@ -88,6 +88,7 @@ func TestAssembleRequestSetsEveryField(t *testing.T) {
 		Assertions:    assertions,
 		Kept:          changes,
 		ManifestFacts: deps.Facts(changes),
+		Library:       "Threats:\nT-001 | Account takeover\n",
 	})
 
 	request := reflect.ValueOf(assembly.Request)

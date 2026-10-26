@@ -1,0 +1,12 @@
+{
+  "description": "The stale-assertion case run cloud-connected with a library that fits nothing in it: password hashing migrates from bcrypt to argon2id, and the org library sent is physical-security entries only. The finding must come back as it does locally, with an empty library_refs — an empty array is the normal answer, and this is the clean case of the library feature: a library that does not fit must not be forced onto a finding.",
+  "no_drift": false,
+  "context_files": ["internal/auth/password.go"],
+  "findings": [
+    {
+      "category": "stale_assertion",
+      "evidence_file": "internal/auth/password.go",
+      "library_refs": []
+    }
+  ]
+}

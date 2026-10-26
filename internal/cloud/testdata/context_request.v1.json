@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "repository": "github.com/acme/payments",
+  "models": [
+    {
+      "slug": "payments",
+      "backend_org": "acme",
+      "files": [
+        {
+          "name": "threatmodels/payments.tm.hcl",
+          "base": "threatmodel \"Payments\" {\n  author = \"@acme\"\n  id     = \"payments\"\n}\n",
+          "head": "threatmodel \"Payments\" {\n  author      = \"@acme\"\n  id          = \"payments\"\n  description = \"Card payments\"\n}\n"
+        },
+        {
+          "name": "threatmodels/payments-auth.tm.hcl",
+          "base": "threatmodel \"Payments Auth\" {\n  author  = \"@acme\"\n  id      = \"payments.auth\"\n  extends = \"payments\"\n}\n",
+          "head": "threatmodel \"Payments Auth\" {\n  author  = \"@acme\"\n  id      = \"payments.auth\"\n  extends = \"payments\"\n}\n"
+        }
+      ]
+    },
+    {
+      "slug": "ledger",
+      "files": [
+        {
+          "name": "threatmodels/ledger.tm.hcl",
+          "head": "threatmodel \"Ledger\" {\n  author = \"@acme\"\n}\n"
+        }
+      ]
+    }
+  ]
+}

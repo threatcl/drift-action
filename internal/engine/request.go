@@ -2,6 +2,7 @@ package engine
 
 import (
 	"os"
+	"strings"
 
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/deps"
@@ -43,6 +44,11 @@ type RequestInput struct {
 	Assertions    *model.Assertions
 	Kept          []diff.Change
 	ManifestFacts []deps.Delta
+	// Library is the rendered ORG LIBRARY section from CloudContext. Empty in
+	// local mode and whenever cloud mode degraded, and then the request is
+	// byte-identical to a local one: no section, no prompt addendum, the v0
+	// schema.
+	Library string
 }
 
 // Assembly is a built review request plus what building it had to leave out.
@@ -71,15 +77,26 @@ func AssembleRequest(cfg config.Config, in RequestInput) Assembly {
 	selection := llm.SelectContext(in.Workspace, in.Assertions.ReferencedPaths(),
 		diff.Paths(in.Kept), cfg.MaxContextBytes)
 
+	// Everything cloud-connected mode changes about the request hangs off the
+	// one condition: a library was sent. Prompt addendum, schema variant and
+	// section all switch together, so a degraded run cannot send a cloud
+	// prompt with a local schema or the reverse.
+	prompt, schema := prompts.DriftCI, findings.SchemaJSON
+	if strings.TrimSpace(in.Library) != "" {
+		prompt = prompts.DriftCI + "\n" + prompts.DriftCICloud
+		schema = findings.CloudSchemaJSON
+	}
+
 	return Assembly{
 		Request: llm.ReviewRequest{
-			Prompt:          prompts.DriftCI,
+			Prompt:          prompt,
 			ModelAssertions: in.Assertions.Render(),
 			ManifestFacts:   deps.Render(in.ManifestFacts),
 			Categories:      cfg.Categories,
+			Library:         in.Library,
 			ContextFiles:    selection.Files,
 			Diff:            diffText,
-			Schema:          findings.SchemaJSON,
+			Schema:          schema,
 		},
 		TooLarge:     tooLarge,
 		Skipped:      selection.Skipped,

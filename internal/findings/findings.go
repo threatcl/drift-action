@@ -63,6 +63,11 @@ type Finding struct {
 	// paste into an AI coding agent to update the threat model.
 	AgentPrompt  string `json:"agent_prompt"`
 	SuggestedFix string `json:"suggested_fix"`
+	// LibraryRefs names the org library entries (reference ids) this finding
+	// corresponds to. Present only in cloud-connected mode, where the schema
+	// requires it; v0 output never carries it. PruneLibraryRefs removes any
+	// id that was not in the library the model was sent.
+	LibraryRefs []string `json:"library_refs,omitempty"`
 }
 
 type Report struct {

@@ -10,32 +10,48 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
-// schemaID identifies the embedded schema to the compiler. It is never
+// schemaID identifies an embedded schema to the compiler. It is never
 // fetched: the document is supplied directly, and the 2020-12 metaschema ships
 // with the validator.
-const schemaID = "https://threatcl.dev/schemas/findings-v0.schema.json"
+const schemaID = "https://threatcl.dev/schemas/findings.schema.json"
 
+// compiledSchema compiles each embedded schema once. Keyed by the document's
+// bytes: the two schemas this package ships are both embedded, so the key is
+// stable and the cache holds at most two entries.
 var (
-	schemaOnce     sync.Once
-	schemaCompiled *jsonschema.Schema
-	schemaErr      error
+	schemaMu  sync.Mutex
+	schemaFor = map[string]*compiledEntry{}
 )
 
-func compiledSchema() (*jsonschema.Schema, error) {
-	schemaOnce.Do(func() {
-		doc, err := jsonschema.UnmarshalJSON(bytes.NewReader(SchemaJSON))
+type compiledEntry struct {
+	once   sync.Once
+	schema *jsonschema.Schema
+	err    error
+}
+
+func compiledSchema(doc []byte) (*jsonschema.Schema, error) {
+	schemaMu.Lock()
+	entry, ok := schemaFor[string(doc)]
+	if !ok {
+		entry = &compiledEntry{}
+		schemaFor[string(doc)] = entry
+	}
+	schemaMu.Unlock()
+
+	entry.once.Do(func() {
+		parsed, err := jsonschema.UnmarshalJSON(bytes.NewReader(doc))
 		if err != nil {
-			schemaErr = fmt.Errorf("reading the embedded findings schema: %w", err)
+			entry.err = fmt.Errorf("reading the embedded findings schema: %w", err)
 			return
 		}
 		compiler := jsonschema.NewCompiler()
-		if err := compiler.AddResource(schemaID, doc); err != nil {
-			schemaErr = fmt.Errorf("loading the embedded findings schema: %w", err)
+		if err := compiler.AddResource(schemaID, parsed); err != nil {
+			entry.err = fmt.Errorf("loading the embedded findings schema: %w", err)
 			return
 		}
-		schemaCompiled, schemaErr = compiler.Compile(schemaID)
+		entry.schema, entry.err = compiler.Compile(schemaID)
 	})
-	return schemaCompiled, schemaErr
+	return entry.schema, entry.err
 }
 
 // ErrInvalidOutput marks output that did not survive validation. Callers match
@@ -44,16 +60,28 @@ func compiledSchema() (*jsonschema.Schema, error) {
 // diff, so it belongs in the run log and never in the pull request comment.
 var ErrInvalidOutput = errors.New("invalid model output")
 
-// Parse validates raw provider output against the embedded schema and decodes
+// Parse validates raw provider output against the local-mode schema
+// (SchemaJSON) and decodes it into a Report. See ParseWith.
+func Parse(raw []byte) (*Report, error) {
+	return ParseWith(SchemaJSON, raw)
+}
+
+// ParseWith validates raw against the schema the request carried and decodes
 // it into a Report.
 //
-// Structured outputs already constrain the model to this schema at generation
+// Structured outputs already constrain the model to the schema at generation
 // time; this is the check that the constraint actually held, and it runs
-// before anything reaches the renderer. The schema file stays the single
-// source of truth — it is both what the API is given and what output is
-// checked against. Nothing that has not been through here may be rendered.
-func Parse(raw []byte) (*Report, error) {
-	schema, err := compiledSchema()
+// before anything reaches the renderer. The schema the provider was sent is
+// the schema the output is checked against — v0 in local mode, the cloud
+// variant when a library was sent — so a cloud-mode answer is held to the
+// library_refs requirement and a local-mode answer is refused for carrying
+// one. An empty schema means SchemaJSON. Nothing that has not been through
+// here may be rendered.
+func ParseWith(schemaDoc, raw []byte) (*Report, error) {
+	if len(schemaDoc) == 0 {
+		schemaDoc = SchemaJSON
+	}
+	schema, err := compiledSchema(schemaDoc)
 	if err != nil {
 		return nil, err
 	}

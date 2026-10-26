@@ -20,7 +20,7 @@ func TestAnalyzeRefusesOverCap(t *testing.T) {
 	t.Setenv(cfg.APIKeyEnv, "")
 
 	kept := []diff.Change{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}
-	report, info := analyze(context.Background(), cfg, analysisInput{
+	report, info, _ := analyze(context.Background(), cfg, analysisInput{
 		filtered:   diff.Result{Kept: kept},
 		comparison: &gh.CompareResult{Changes: kept},
 	})
@@ -50,7 +50,7 @@ func TestAnalyzeNamesExcludedFiles(t *testing.T) {
 	t.Setenv(cfg.APIKeyEnv, "")
 
 	changes := []diff.Change{{Path: "gen/a.go"}, {Path: "db/queries.go"}, {Path: "README.md"}}
-	report, info := analyze(context.Background(), cfg, analysisInput{
+	report, info, _ := analyze(context.Background(), cfg, analysisInput{
 		filtered: diff.Result{
 			Noise:     2,
 			Generated: []string{"db/queries.go"},
@@ -90,7 +90,7 @@ func TestAnalyzeAtCapProceeds(t *testing.T) {
 	t.Setenv(cfg.APIKeyEnv, "")
 
 	kept := []diff.Change{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}
-	_, info := analyze(context.Background(), cfg, analysisInput{
+	_, info, _ := analyze(context.Background(), cfg, analysisInput{
 		filtered:   diff.Result{Kept: kept},
 		comparison: &gh.CompareResult{Changes: kept},
 	})

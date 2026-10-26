@@ -89,6 +89,19 @@ is asked anything.
 
 - **Never commit** `github-drift-integration-plan.md` or
   `prior-claude-chat.md` (gitignored; internal business context).
+- **Cloud never receives source or diffs.** `internal/cloud` imports nothing
+  from this module (`TestImportsNothingThatCarriesCode`), so it cannot be
+  handed a `diff.Change`, a `ReviewRequest` or a `Report`; what crosses is
+  model HCL, the token, and a counts-only `ReviewRecord` whose every string
+  field is enum- or pattern-tagged (`TestReviewRecordHasNoFreeText`). The
+  canary test (`TestCloudNeverSeesCode`) plants a marker in the diff and a
+  context file and asserts it reaches no cloud request. Do not add a field
+  to the record, or an import to the package, that would weaken either.
+- **The cloud API URL is never read from `.threatcl-ci.hcl`.** That file
+  arrives in the pull request; a URL in it would send the org's token to a
+  host of the PR's choosing. `THREATCL_API_URL` only, https unless loopback,
+  and the client refuses every redirect. `cloudBlock` deliberately declares
+  no `api_url`, and `TestCloudBlockRefusesURL` pins that gohcl rejects one.
 - **Prompt provenance:** `prompts/upstream/` is a verbatim copy of
   claude-plugin's `commands/threat-drift.md` at the SHA in
   `prompts/upstream/SOURCE`. Never hand-edit it — re-vendor and update SOURCE.
@@ -130,11 +143,79 @@ is asked anything.
   `os.Getenv`, impossible from POSIX shell. Inputs that need setting by hand
   during local runs therefore get a shell-friendly alias — `dry-run` has
   `THREATCL_DRIFT_DRY_RUN` (`config.DryRunEnv`).
-- `dry-run` suppresses every GitHub write and nothing else: the diff is still
-  fetched (so a token is still required), the comment is still rendered and
-  printed, and the verdict and exit code are unchanged. A non-boolean value is
-  a hard error, never a silent `false` — someone who believes they asked for a
-  dry run must never have a comment posted on their behalf.
+- `dry-run` suppresses every GitHub write **and the cloud write-back**, and
+  nothing else: the diff is still fetched (so a token is still required), the
+  cloud context is still read (it persists nothing server-side), the comment
+  is still rendered and printed, and the verdict and exit code are unchanged.
+  A non-boolean value is a hard error, never a silent `false` — someone who
+  believes they asked for a dry run must never have a comment posted or a
+  review recorded on their behalf.
+- **Cloud-connected mode is turned on by the token and nothing else**
+  (`THREATCL_API_TOKEN`, the CLI's name, forwarded from the
+  `threatcl-api-token` input). The `cloud {}` block configures it but never
+  enables it; its only effect without a token is the "not connected — no API
+  token in this run" note, so a fork PR on a cloud-configured repo says so.
+  Every cloud failure degrades to the local run plus one ℹ️ line, worded by
+  cause from status and code (`engine.degradation`) — the server's message
+  goes to the run log and never to the comment. Degraded must mean
+  byte-identical to local: `TestDegradedRequestMatchesLocal` and the corpus's
+  `TestCorpusDegradedMatchesLocal` assert it by digest.
+- **Everything cloud mode changes about the LLM request hangs off one
+  condition: `RequestInput.Library` is non-empty.** Then and only then
+  `AssembleRequest` appends `prompts/drift-ci-cloud.md`, switches the schema
+  to `findings-v0-cloud` (v0 plus a required `library_refs` array) and
+  `Sections()` emits `=== ORG LIBRARY ===` after `ENABLED CATEGORIES`. No
+  "(none)" placeholder in local mode — it would change every recording's
+  digest. The cloud schema is a separate document because OpenAI strict mode
+  requires every property, so adding the field to v0 would invalidate all 24
+  local recordings.
+- **Providers validate against the schema they were sent**
+  (`findings.ParseWith(req.Schema, …)`), never a fixed one: a cloud answer
+  must carry `library_refs` and a local answer must not. `ReviewResult.Raw`
+  keeps the model's output as validated, and the recorder writes that rather
+  than re-marshalling the parsed struct — an empty `library_refs` would
+  vanish through `omitempty` and fail the cloud schema on replay. The player
+  validates a recording against the *replaying request's* schema, so a local
+  recording cannot pass for a cloud one or the reverse.
+- **Library refs are enforced in code**: `findings.PruneLibraryRefs` drops
+  any id not in the index that was sent (with no library, every id), and the
+  renderer prints id and name from `CloudInfo.Library.Names`, never the
+  model's spelling. Same shape as the evidence rule.
+- **Linking is by backend address** (`model.Assertions.Backends()`, per file,
+  attributed by an hclsyntax scan on the set route because spec appends
+  blocks to one list). `cloud.Link` implements the §3 table; contradictions
+  with `cloud.model` are hard errors from `engine.CloudLink`, raised in main
+  before the diff is fetched, token or no token. A file with no block follows
+  the one address the set declares; with several it is left unlinked and
+  reported. `Backends()` must never reach `Render()` —
+  `TestRenderSingleFileUnchanged` stays green untouched.
+- **Alignment states the server returns need reading** (`render/cloud.go`):
+  `conflict` with a present-but-empty delta means the head already equals
+  cloud's current version — rendered as *syncing*, no warning, no Model sync
+  block. `conflict` with a `head_parse_error` note has a null delta — still a
+  conflict, with "what differs could not be listed". Only a real conflict
+  warns above the fold; `behind` gets the Model sync block alone. Versions
+  are strings (`"1.0.6"`). Unknown states and notes render generically; the
+  server may add to either set additively.
+- **The policy gate** (`render.PolicyGate`, from `CloudInfo.Gate()`): failure
+  only under `policy_fail_mode = "on-enforced-violation"` with blocking > 0;
+  a blocking violation is never `success` whatever the mode; a gate that is
+  configured but could not be applied (degraded, or a linked model with a
+  null verdict) is `neutral`, never green, and warns above the fold.
+- **The write-back runs before the comment is rendered**, so a failed one is
+  disclosed in it. Skipped on dry run and on a replayed review. The record's
+  `llm_model` is the model that actually answered (analyze's third return),
+  and `action_version` is included only when it fits the ledger's pattern.
+- **Base content comes from the GitHub contents API at the base SHA**
+  (`gh.Client.FileAt`); 404 means the PR added the file and `base` is
+  omitted. Any other error degrades the whole call rather than sending an
+  absent base, which would read as "never synced".
+- **Contract goldens** in `internal/cloud/testdata/*.v1.json` are verbatim
+  copies from tcl-test (`testdata/SOURCE` names where and which commit).
+  Never hand-edit; re-copy. `TestContractGoldens` decodes them with unknown
+  fields refused and re-encodes the request shapes byte-for-byte. Until
+  schema 1 ships from both repos a contract change is an edit to both; after
+  that it is schema 2.
 - `go.mod` requires go 1.26.5 — forced by the `threatcl/spec` dependency.
   Keep the Dockerfile's `golang:` base and spec bumps in sync.
 - Anthropic structured outputs don't support `minItems`, so "≥1 evidence per
@@ -331,6 +412,21 @@ Dogfooding is live on this repo's own pull requests, and has already found
 real gaps in this repo's own threat model that the agent-prompt handoff then
 remediated.
 
+Cloud-connected mode (`docs/cloud-connected-mode.md`) is implemented on the
+`tcl-integration` branch against tcl-test's `drift-api-support` branch and
+not yet released from either side. Config, `internal/cloud`, linking,
+`engine.CloudContext`, the renderer (alignment, Model sync, policy, library
+matches), the policy gate, the write-back, the conditional prompt/schema
+switch, ref pruning and the corpus fixture support are all in, with the
+eight existing cases replaying untouched on all three providers. The two new
+corpus cases (`cloud-library-ref`, `cloud-library-no-match`) are recorded on
+all three providers (2026-10-26): every provider cites `T-DATA-004` on the
+ref case and nothing on the no-match case, and primaries stay
+`action_required`, so the full ten-case replay is green for all three. A
+live check against a local tcl-test stack (`drift-api-support`, 2026-10-24)
+exercised every alignment state, the tier gate, the write-back and each
+degradation path through the binary; no contract change was needed.
+
 A release is a **`workflow_dispatch`, not a tag push**. `release.yml` publishes
 the image, reads back its digest, commits that digest into `action.yml` on
 `main`, tags that commit, and moves the major alias; pushing a tag by hand
@@ -340,6 +436,21 @@ and the partial-failure recovery table, before dispatching. v0.1.0 through
 v0.1.2 shipped; v1 is the next cut and the docs already name it.
 
 ## Open items
+
+- A `--live` run with a real model and the token set
+  (`THREATCL_API_URL=http://localhost:8080 THREATCL_API_TOKEN=tcl_… ANTHROPIC_API_KEY=… hack/dry-run.sh --live`)
+  is the one path not yet exercised end to end: `library_refs` populated by
+  a live review and rendered as `Library match`. `--post` on top would
+  record from the binary; the record path is unit-tested and the HTTP shape
+  was verified with curl. A local-mode recording cannot be replayed into a
+  cloud-connected run (the cloud schema refuses it, by design) — record once
+  with the token set to iterate on the GitHub half with cloud on.
+- Two providers rated a secondary finding one tier higher with the library
+  present than without (`prompts/ADAPTATIONS.md`, cloud addendum). Not a
+  gate change; re-check if the addendum is reworded.
+- Cross-repo touch list in `docs/cloud-connected-mode.md` §12: claude-plugin
+  `/threat-ci drift` (token input, `cloud {}` block, privacy wording), the
+  docs site, the vendored plugin, and the tcl-test plan doc's tier.
 
 - The claude-plugin's `/threat-ci` scaffolder still emits the wrong thing: it
   needs to write `.threatcl-ci.hcl` and a workflow with a `concurrency:`

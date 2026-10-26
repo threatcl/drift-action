@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "org": {"slug": "corpus", "tier": "team"},
+  "models": [],
+  "library": {
+    "threats": [
+      {"reference_id": "T-AUTH-001", "name": "Credential stuffing against login endpoints"},
+      {"reference_id": "T-AUTH-002", "name": "Session token replay"},
+      {"reference_id": "T-DATA-004", "name": "Unauthenticated bulk data export"},
+      {"reference_id": "T-SUPPLY-001", "name": "Compromised build dependency"}
+    ],
+    "controls": [
+      {"reference_id": "C-RATE-001", "name": "Per-client rate limiting"},
+      {"reference_id": "C-AUTHZ-003", "name": "Authorisation check on every administrative route"}
+    ],
+    "truncated": false
+  }
+}

@@ -1,0 +1,17 @@
+The *.v1.json files in this directory are verbatim copies of the schema 1
+contract goldens in threatcl-cloud/tcl-test:
+
+  api/internal/handlers/testdata/drift/context_request.v1.json
+  api/internal/handlers/testdata/drift/context_response.v1.json
+  api/internal/handlers/testdata/drift/review_request.v1.json
+
+tcl-test pins them with TestDriftContract_V1, which serialises its real
+request and response structs against these files; this repo's
+TestContractGoldens decodes them into internal/cloud's types and re-encodes
+the request shapes byte-for-byte. Both tests passing is what makes the two
+repos agree.
+
+Copied from branch drift-api-support, working tree at commit
+d421c0b1ec9bff2270619b71f545d49dd9e12e95 (the files were not yet committed
+there). Never hand-edit them: re-copy from tcl-test and update this line. A
+change that is not additive is schema 2.

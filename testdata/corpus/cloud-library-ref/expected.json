@@ -1,0 +1,11 @@
+{
+  "description": "The unmodeled-surface case run cloud-connected: a new GET /admin/export endpoint bulk-exports user rows as CSV without the session middleware, and no threat models it. The org library sent with the request has one entry that describes exactly that — T-DATA-004, unauthenticated bulk data export — beside entries that do not fit, so the finding must carry that reference id in library_refs and nothing else. Alignment and policy come from the fixture under cloud/, never from a live call.",
+  "no_drift": false,
+  "findings": [
+    {
+      "category": "unmodeled_surface",
+      "evidence_file": "internal/httpapi/export.go",
+      "library_refs": ["T-DATA-004"]
+    }
+  ]
+}
