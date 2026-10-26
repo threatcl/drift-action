@@ -35,8 +35,7 @@ func TestBackendsPerFile(t *testing.T) {
 	root := t.TempDir()
 	writeModel(t, root, "parent.tm.hcl", backendParent)
 	writeModel(t, root, "child.tm.hcl", backendChild)
-	writeModel(t, root, "other.tm.hcl", strings.Replace(
-		strings.Replace(backendParent, `"payments"`, `"ledger"`, -1), "payments api", "ledger", 1))
+	writeModel(t, root, "other.tm.hcl", strings.ReplaceAll(backendParent, `"payments"`, `"ledger"`))
 
 	single, err := LoadIn(root, "parent.tm.hcl")
 	if err != nil {

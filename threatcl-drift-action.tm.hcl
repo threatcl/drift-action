@@ -42,13 +42,13 @@ threatmodel "threatcl-drift-action" {
 
   threat "Prompt injection via PR-controlled diff or context files" {
     ref         = "TCL-T-LLM-PROMPTINJ"
-    description = "A PR author embeds instructions or counterfeit section markers in any PR-controlled prompt input to suppress drift findings or forge evidence citations that the evidence sanitizer cannot distinguish from real ones. internal/llm/sections.go builds the prompt from three: the diff, the repo files selected as context, and the THREAT MODEL ASSERTIONS section, which internal/model/render.go renders from what the assessed threat model files declare — names, descriptions and implementation notes, read from the pull request's own checkout. Which files those are is PR-controlled as well: model_paths in the pull request's .threatcl-ci.hcl may list several, parsed by internal/model/model.go as one set. In that section names are quoted and field text is label-prefixed and indented, but a model's top-level description is rendered as-is, so its lines can begin with a counterfeit section marker; ids are held to identifier syntax by threatcl/spec, and the extends line is the engine's own wording. 'Schema-forced JSON and evidence sanitization' and 'Model output reaches only the report body' bound all three inputs alike. 'Threat model files are read only from inside the checkout', under the 'Repo source and diff shared with the LLM provider' threat, bounds only which files can be read, not what their prose says"
+    description = "A PR author embeds instructions or counterfeit section markers in any PR-controlled prompt input to suppress drift findings or forge evidence citations that the evidence sanitizer cannot distinguish from real ones. internal/llm/sections.go builds the prompt from three PR-controlled inputs: the diff, the repo files selected as context, and the THREAT MODEL ASSERTIONS section, which internal/model/render.go renders from what the assessed threat model files declare — names, descriptions and implementation notes, read from the pull request's own checkout. Cloud-connected mode adds a fourth, ORG LIBRARY, which is org-authored rather than PR-controlled: renderLibrary in internal/engine/cloud.go folds every entry name onto one line so it cannot start a counterfeit section marker, and PruneLibraryRefs holds the model's citations to the ids that were sent. Which files those are is PR-controlled as well: model_paths in the pull request's .threatcl-ci.hcl may list several, parsed by internal/model/model.go as one set. In that section names are quoted and field text is label-prefixed and indented, but a model's top-level description is rendered as-is, so its lines can begin with a counterfeit section marker; ids are held to identifier syntax by threatcl/spec, and the extends line is the engine's own wording. 'Schema-forced JSON and evidence sanitization' and 'Model output reaches only the report body' bound all three inputs alike. 'Threat model files are read only from inside the checkout', under the 'Repo source and diff shared with the LLM provider' threat, bounds only which files can be read, not what their prose says"
     impacts     = ["Integrity"]
     stride      = ["Tampering", "Spoofing"]
 
     control "Schema-forced JSON and evidence sanitization" {
       ref            = "TCL-C-LLM-SCHEMA"
-      description    = "Output must validate against the findings-v0 schema in internal/findings/validate.go; findings.Sanitize in internal/findings/schema.go drops evidence-free findings in code, not just in the prompt"
+      description    = "Output must validate against the schema the request carried — findings-v0 locally, findings-v0-cloud (v0 plus a required library_refs array) when an org library was sent — through findings.ParseWith in internal/findings/validate.go, in every provider and in the fixture player alike; findings.Sanitize in internal/findings/schema.go drops evidence-free findings in code, not just in the prompt, and PruneLibraryRefs does the same for a library reference the model was not sent"
       implemented    = true
       risk_reduction = 40
     }
@@ -277,7 +277,7 @@ threatmodel "threatcl-drift-action" {
   }
 
   third_party_dependency "GitHub API" {
-    description       = "Source of the PR diff via the compare endpoint, and the write surface for the sticky comment and check run"
+    description       = "Source of the PR diff via the compare endpoint, and the write surface for the sticky comment and check run. In cloud-connected mode also the source of the base-commit copy of each linked threat model file, read through the contents endpoint by FileAt in internal/gh/client.go and forwarded to Threatcl Cloud for alignment; a read failure there degrades cloud mode rather than sending an absent base, which would read as never synced"
     saas              = true
     uptime_dependency = "hard"
   }
@@ -446,6 +446,14 @@ threatmodel "threatcl-drift-action" {
     }
 
     flow "diff and context fetch" {
+      from = "GitHub API"
+      to   = "Drift Review Engine"
+    }
+
+    # Cloud-connected mode only: the base-commit copy of each linked threat
+    # model file, read by FileAt through the contents endpoint and forwarded
+    # on the "threat model context call" flow below.
+    flow "base threat model fetch" {
       from = "GitHub API"
       to   = "Drift Review Engine"
     }
