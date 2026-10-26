@@ -1,0 +1,84 @@
+{
+  "recorded_at": "2026-10-26T08:05:19Z",
+  "source": "corpus/cloud-library-ref",
+  "model": "claude-opus-5",
+  "request_digest": "c1a23783ea4b51bc742a3185911c684270bfe442f51d38afee087062f8f333eb",
+  "report": {
+    "schema_version": "0.1",
+    "no_drift": false,
+    "summary": "Two findings: a new unauthenticated GET /admin/export route that the model does not represent (action_required), plus the user email/created_at data it streams being uncovered by any information asset.",
+    "findings": [
+      {
+        "category": "unmodeled_surface",
+        "severity": "action_required",
+        "title": "New unauthenticated GET /admin/export route is absent from the threat model",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 3,
+          "quote": "Login service exposing POST /login and GET /profile"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 10,
+            "note": "New route mux.Handle(\"GET /admin/export\", exportHandler(store)) registered without requireSession, unlike GET /profile on the preceding line"
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 9,
+            "note": "exportHandler performs no authentication or authorisation check before streaming data"
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 15,
+            "note": "Handler iterates store.Users() and streams every user row as CSV — bulk export of all users"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "The model scopes the service to exactly POST /login and GET /profile; the diff adds a third, admin-named route that bypasses the session check the model relies on."
+        },
+        "agent_prompt": "Update app.tm.hcl for the login service threat model. A new route GET /admin/export was added in internal/httpapi/routes.go (line 10) handled by exportHandler in internal/httpapi/export.go, which streams every user row as CSV with no requireSession wrapper and no authorisation check. (1) Update the threat model description on line 3 so it lists POST /login, GET /profile and GET /admin/export. (2) Add a threat block referencing the org library entry T-DATA-004 (ref = \"T-DATA-004\", unauthenticated bulk data export) covering this endpoint, with stride = \"Information Disclosure\" and impacts = [\"Confidentiality\"]. (3) Attach a control block referencing C-AUTHZ-003 (ref = \"C-AUTHZ-003\", authorisation check on every administrative route) with implemented = false until the route enforces authentication/authorisation.",
+        "suggested_fix": "Add a threat with ref = \"T-DATA-004\" for GET /admin/export plus a control ref = \"C-AUTHZ-003\" (implemented = false), and extend the model description to list the new route.",
+        "library_refs": [
+          "T-DATA-004",
+          "C-AUTHZ-003"
+        ]
+      },
+      {
+        "category": "unclassified_data",
+        "severity": "action_required",
+        "title": "User email addresses exported with no covering information asset",
+        "model_excerpt": {
+          "file": "app.tm.hcl",
+          "line": 7,
+          "quote": "information_asset \"user credentials\" classification=Restricted — Usernames and password hashes in the users table"
+        },
+        "evidence": [
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 14,
+            "note": "CSV header declares columns id, email, created_at"
+          },
+          {
+            "file": "internal/httpapi/export.go",
+            "line": 16,
+            "note": "u.Email and u.CreatedAt written for every user in the store"
+          },
+          {
+            "file": "internal/httpapi/routes.go",
+            "line": 10,
+            "note": "This personal data is reachable over GET /admin/export without the requireSession wrapper used by GET /profile"
+          }
+        ],
+        "relevance": {
+          "rating": "strong",
+          "justification": "Email addresses are personal data and the model's only asset covers usernames and password hashes, so this egress is unmodelled and currently unauthenticated."
+        },
+        "agent_prompt": "Update app.tm.hcl: the only information_asset is \"user credentials\" (line 7, usernames and password hashes). internal/httpapi/export.go now emits id, email and created_at for every user (lines 14 and 16) over the new GET /admin/export route. Add an information_asset block such as \"user profile data\" with description covering user IDs, email addresses and account creation timestamps and an appropriate classification (Confidential or higher, as it is personal data), and reference it from the threat covering the export endpoint.",
+        "suggested_fix": "Add an information_asset block covering user email addresses and account metadata exposed by the CSV export.",
+        "library_refs": []
+      }
+    ]
+  }
+}

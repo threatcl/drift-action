@@ -57,6 +57,9 @@ type ContextInfo struct {
 	Replayed     bool
 	AnalysisMode string
 	Notes        []string
+	// Cloud is what cloud-connected mode learned. Nil in local mode, and
+	// then nothing about cloud is rendered.
+	Cloud *CloudInfo
 }
 
 var categoryLabels = map[findings.Category]struct{ Icon, Name string }{
@@ -81,11 +84,13 @@ func Comment(report *findings.Report, info ContextInfo) string {
 	var b strings.Builder
 	b.WriteString(StickyMarker + "\n\n" + heading + "\n\n")
 
-	writeCounts(&b, report)
+	writeCounts(&b, report, info)
 	writeVerdict(&b, report)
 	writeWarnings(&b, info)
 	writeContext(&b, info)
-	writeFindings(&b, report)
+	writeModelSync(&b, info)
+	writeFindings(&b, report, info)
+	writePolicyViolations(&b, info)
 
 	return b.String()
 }
@@ -120,6 +125,7 @@ func writeWarnings(b *strings.Builder, info ContextInfo) {
 		lines = append(lines,
 			"⚠️ Replayed review: no model ran in this build — these findings come from a recording, not from this diff")
 	}
+	lines = writeCloudWarnings(lines, info)
 	if len(lines) == 0 {
 		return
 	}
@@ -129,7 +135,7 @@ func writeWarnings(b *strings.Builder, info ContextInfo) {
 	b.WriteString("\n")
 }
 
-func writeCounts(b *strings.Builder, report *findings.Report) {
+func writeCounts(b *strings.Builder, report *findings.Report, info ContextInfo) {
 	counts := map[findings.Category]int{}
 	for _, finding := range report.Findings {
 		counts[finding.Category]++
@@ -141,7 +147,15 @@ func writeCounts(b *strings.Builder, report *findings.Report) {
 		cells = append(cells, fmt.Sprintf("%s %s (%d)", label.Icon, label.Name, counts[category]))
 	}
 	// Two rows of three keeps the header readable on a phone.
-	fmt.Fprintf(b, "%s\n%s\n\n", strings.Join(cells[:3], " · "), strings.Join(cells[3:], " · "))
+	fmt.Fprintf(b, "%s\n%s\n", strings.Join(cells[:3], " · "), strings.Join(cells[3:], " · "))
+	// A third row only when policies were actually evaluated: it is cloud
+	// mode's cell, and local comments must not change.
+	if info.Cloud != nil && info.Cloud.Degraded == "" {
+		if evaluated, totals := info.Cloud.policyTotals(); evaluated {
+			fmt.Fprintf(b, "⚖️ Policy violations (%d)\n", totals.Violated)
+		}
+	}
+	b.WriteString("\n")
 }
 
 func writeVerdict(b *strings.Builder, report *findings.Report) {
@@ -200,6 +214,7 @@ func writeContext(b *strings.Builder, info ContextInfo) {
 	}
 	// Coverage warnings render above the fold in writeWarnings, not here — a
 	// collapsed block must never be the only place a gap is disclosed.
+	writeCloudContext(b, info)
 	if info.AnalysisMode != "" {
 		fmt.Fprintf(b, "- 🤖 Analysis: %s\n", info.AnalysisMode)
 	}
@@ -210,7 +225,7 @@ func writeContext(b *strings.Builder, info ContextInfo) {
 	b.WriteString("\n</details>\n")
 }
 
-func writeFindings(b *strings.Builder, report *findings.Report) {
+func writeFindings(b *strings.Builder, report *findings.Report, info ContextInfo) {
 	index := 0
 	for _, section := range severitySections {
 		matching := bySeverity(report.Findings, section.Severity)
@@ -220,7 +235,7 @@ func writeFindings(b *strings.Builder, report *findings.Report) {
 		fmt.Fprintf(b, "\n### %s\n\n", section.Title)
 		for _, finding := range matching {
 			index++
-			writeFinding(b, index, finding)
+			writeFinding(b, index, finding, info)
 		}
 	}
 }
@@ -235,7 +250,7 @@ func bySeverity(all []findings.Finding, severity findings.Severity) []findings.F
 	return matching
 }
 
-func writeFinding(b *strings.Builder, index int, finding findings.Finding) {
+func writeFinding(b *strings.Builder, index int, finding findings.Finding, info ContextInfo) {
 	label := categoryLabels[finding.Category]
 
 	b.WriteString("<details>\n")
@@ -263,6 +278,10 @@ func writeFinding(b *strings.Builder, index int, finding findings.Finding) {
 		b.WriteString("\n\n")
 	}
 
+	if matches := libraryMatches(finding.LibraryRefs, info); matches != "" {
+		fmt.Fprintf(b, "**Library match:** %s\n\n", matches)
+	}
+
 	if finding.SuggestedFix != "" {
 		fmt.Fprintf(b, "**Suggested fix:** %s\n\n", finding.SuggestedFix)
 	}
@@ -288,28 +307,43 @@ func location(file string, line int) string {
 	return fmt.Sprintf("`%s:%d`", file, line)
 }
 
-// CheckConclusion maps a report to a check-run conclusion. Findings are
-// neutral by default; failing is opt-in through fail mode.
+// CheckConclusion maps a report and the policy gate to a check-run
+// conclusion. Findings are neutral by default; failing is opt-in through fail
+// mode, and separately through cloud.policy_fail_mode. When both gates trip
+// the title names both.
 //
 // Success is reserved for a run that actually assessed the model and found it
 // consistent. A run that produced no findings because coverage was partial —
 // inference disabled, a refused request, a diff over the cap — reports neutral:
 // a green check is a claim, and the check run must not make one the comment
-// explicitly declines to make.
-func CheckConclusion(report *findings.Report, failMode string) (conclusion, title string) {
-	if len(report.Findings) == 0 {
-		if report.NoDrift {
-			return "success", "No threat model drift detected"
-		}
+// explicitly declines to make. The same holds for the policy gate: a blocking
+// violation is never success, and a gate that could not be applied while it
+// was configured is neutral rather than green, so someone who believes their
+// pull requests are policy-gated is told when one was not.
+func CheckConclusion(report *findings.Report, failMode string, policy PolicyGate) (conclusion, title string) {
+	actionRequired := len(bySeverity(report.Findings, findings.SeverityActionRequired))
+	driftFails := failMode == config.FailOnActionRequired && actionRequired > 0
+	policyGated := policy.Mode == config.PolicyFailOnEnforcedViolation
+	policyFails := policyGated && policy.Blocking > 0
+
+	var parts []string
+	if len(report.Findings) > 0 {
+		parts = append(parts, fmt.Sprintf("%d drift finding(s), %d action required", len(report.Findings), actionRequired))
+	}
+	if policy.Blocking > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocking policy violation(s)", policy.Blocking))
+	}
+
+	switch {
+	case driftFails || policyFails:
+		return "failure", strings.Join(parts, "; ")
+	case len(parts) > 0:
+		return "neutral", strings.Join(parts, "; ")
+	case report.NoDrift && policyGated && policy.Unavailable:
+		return "neutral", "No threat model drift detected; policies could not be evaluated"
+	case report.NoDrift:
+		return "success", "No threat model drift detected"
+	default:
 		return "neutral", "No findings — see the comment for what was assessed"
 	}
-
-	actionRequired := len(bySeverity(report.Findings, findings.SeverityActionRequired))
-	title = fmt.Sprintf("%d drift finding(s), %d action required",
-		len(report.Findings), actionRequired)
-
-	if failMode == config.FailOnActionRequired && actionRequired > 0 {
-		return "failure", title
-	}
-	return "neutral", title
 }

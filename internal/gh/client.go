@@ -93,6 +93,31 @@ func (c *Client) Compare(ctx context.Context, base, head string) (*CompareResult
 	return result, nil
 }
 
+// FileAt returns the contents of a repo-relative path at ref, with found=false
+// when nothing exists there — a file the pull request adds has no base
+// version. Cloud-connected mode compares the base-commit threat model with the
+// cloud copy, and the checkout holds only the head, so the base comes from
+// here. Files over the API's 1 MB content limit come back as an error rather
+// than truncated.
+func (c *Client) FileAt(ctx context.Context, ref, path string) (content []byte, found bool, err error) {
+	file, _, resp, err := c.api.Repositories.GetContents(ctx, c.owner, c.repo, path,
+		&github.RepositoryContentGetOptions{Ref: ref})
+	if err != nil {
+		if resp != nil && resp.StatusCode == 404 {
+			return nil, false, nil
+		}
+		return nil, false, fmt.Errorf("reading %s at %s: %w", path, ref, err)
+	}
+	if file == nil {
+		return nil, false, fmt.Errorf("reading %s at %s: it is a directory", path, ref)
+	}
+	text, err := file.GetContent()
+	if err != nil {
+		return nil, false, fmt.Errorf("decoding %s at %s: %w", path, ref, err)
+	}
+	return []byte(text), true, nil
+}
+
 // UpsertStickyComment creates the action's PR comment, or edits the existing
 // one in place so a PR accumulates one comment rather than one per push.
 func (c *Client) UpsertStickyComment(ctx context.Context, body string) error {

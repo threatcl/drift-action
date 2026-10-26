@@ -29,12 +29,19 @@ type ReviewRequest struct {
 	// Categories restricts the review to a subset of the six drift
 	// categories. Empty means all six.
 	Categories []string
+	// Library is the rendered ORG LIBRARY section: the organisation's
+	// referenceable threats and controls from Threatcl Cloud. Empty in local
+	// mode, and then no section is emitted at all — a placeholder would
+	// change every local-mode request's fingerprint.
+	Library string
 	// ContextFiles are repo files sent whole — targeted context stuffing for
 	// controls and threats plausibly backed by touched files.
 	ContextFiles []ContextFile
 	// Diff is the rendered, filtered unified diff.
 	Diff string
-	// Schema is the forced output schema (findings.SchemaJSON).
+	// Schema is the forced output schema: findings.SchemaJSON, or
+	// findings.CloudSchemaJSON when Library is set. Providers validate the
+	// answer against this same document.
 	Schema []byte
 }
 
@@ -42,6 +49,11 @@ type ReviewRequest struct {
 type ReviewResult struct {
 	// Report is the validated model output.
 	Report *findings.Report
+	// Raw is the model's output exactly as validated, so a recording keeps
+	// what the model said rather than a re-serialisation of the parsed
+	// struct — which could not round-trip an empty library_refs through
+	// omitempty. Replays and fixtures may leave it empty.
+	Raw []byte
 	// Model is the model that actually answered. It differs from the
 	// requested model when a server-side fallback served the review, which
 	// the comment has to disclose: a review is only interpretable if the

@@ -27,13 +27,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/threatcl/drift-action/internal/cloud"
+	"github.com/threatcl/drift-action/internal/cloud/cloudtest"
 	"github.com/threatcl/drift-action/internal/config"
 	"github.com/threatcl/drift-action/internal/deps"
 	"github.com/threatcl/drift-action/internal/diff"
@@ -137,6 +141,10 @@ type expectedFinding struct {
 	Category     string `json:"category"`
 	EvidenceFile string `json:"evidence_file"`
 	ModelFile    string `json:"model_file"`
+	// LibraryRefs, when present, pins the finding's library_refs: every id
+	// listed must be cited, and an empty list means none may be. Absent
+	// means not asserted, which is every local-mode case.
+	LibraryRefs *[]string `json:"library_refs"`
 }
 
 // changeSpec is one entry in a case's changes.json. The patch lives in a
@@ -206,15 +214,108 @@ func readChanges(t *testing.T, dir string) []diff.Change {
 	return changes
 }
 
+// cloudFixture is a case's recorded Threatcl Cloud answer: cloud/context.json
+// is the context response, and the optional cloud/status forces a failure
+// instead ("401", "403 upgrade_required", "timeout"). A case without the
+// directory runs local, exactly as the action does without a token.
+type cloudFixture struct {
+	body   []byte
+	status int
+	code   string
+	hang   bool
+}
+
+func readCloudFixture(t *testing.T, dir string) *cloudFixture {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, "cloud", "context.json"))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	fx := &cloudFixture{body: body}
+	if raw, err := os.ReadFile(filepath.Join(dir, "cloud", "status")); err == nil {
+		fields := strings.Fields(string(raw))
+		if len(fields) > 0 && fields[0] == "timeout" {
+			fx.hang = true
+		} else if len(fields) > 0 {
+			fx.status, err = strconv.Atoi(fields[0])
+			if err != nil {
+				t.Fatalf("cloud/status: %v", err)
+			}
+			if len(fields) > 1 {
+				fx.code = fields[1]
+			}
+		}
+	}
+	return fx
+}
+
+// transport builds the fixture transport, which fails the test on any
+// request it did not plan for — an unplanned call to cloud is a test failure,
+// never a network call.
+func (fx *cloudFixture) transport(t *testing.T) *cloudtest.Transport {
+	t.Helper()
+	tr := &cloudtest.Transport{Fail: t.Errorf}
+	switch {
+	case fx.hang:
+		tr.Hang = true
+	case fx.status != 0:
+		tr.ContextStatus = fx.status
+		tr.ContextBody = cloudtest.ErrorBody(fx.status, fx.code, "fixture")
+	default:
+		tr.ContextBody = fx.body
+	}
+	return tr
+}
+
+// cloudContext runs the engine's context call against the fixture, exactly
+// as main does, with the base copy of each model file served from the
+// workspace (the case is "aligned" unless its fixture says otherwise).
+func cloudContext(t *testing.T, cfg config.Config, workspace string, assertions *model.Assertions, fx *cloudFixture) engine.CloudOutcome {
+	t.Helper()
+	if fx == nil {
+		return engine.CloudContext(context.Background(), cfg, engine.CloudInput{Workspace: workspace, Assertions: assertions})
+	}
+	client, err := cloud.New(cloud.Options{BaseURL: "https://cloud.corpus.test", Token: "tcl_corpus", Version: "corpus", Transport: fx.transport(t)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	if fx.hang {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, 200*time.Millisecond)
+		defer cancel()
+	}
+	return engine.CloudContext(ctx, cfg, engine.CloudInput{
+		Client: client, Workspace: workspace, Repository: "github.com/threatcl/corpus", Assertions: assertions,
+		Base: func(_ context.Context, path string) ([]byte, bool, error) {
+			raw, err := os.ReadFile(filepath.Join(workspace, path))
+			if os.IsNotExist(err) {
+				return nil, false, nil
+			}
+			return raw, err == nil, err
+		},
+	})
+}
+
 // assemble builds the review request for one case through the same code the
-// action runs: engine.LoadModel, engine.FilterChanges and
-// engine.AssembleRequest. Reproducing any of them here is how the corpus
+// action runs: engine.LoadModel, engine.FilterChanges, engine.CloudContext
+// and engine.AssembleRequest. Reproducing any of them here is how the corpus
 // previously came to measure a request the action does not send.
 //
 // A case may carry workspace/.threatcl-ci.hcl, read as the action reads a
 // repo's. The multi-file case needs one: discovery refuses to guess between
-// several models, so a set is only ever assessed through model_paths.
+// several models, so a set is only ever assessed through model_paths. A case
+// may also carry cloud/ (see cloudFixture), and then it is a cloud-connected
+// review.
 func assemble(t *testing.T, dir string) llm.ReviewRequest {
+	t.Helper()
+	return assembleWith(t, dir, readCloudFixture(t, dir))
+}
+
+func assembleWith(t *testing.T, dir string, fx *cloudFixture) llm.ReviewRequest {
 	t.Helper()
 	workspace := filepath.Join(dir, "workspace")
 
@@ -226,6 +327,9 @@ func assemble(t *testing.T, dir string) llm.ReviewRequest {
 	if err != nil {
 		t.Fatalf("loading the threat model: %v", err)
 	}
+	if _, err := engine.CloudLink(cfg, assertions); err != nil {
+		t.Fatalf("linking the threat model: %v", err)
+	}
 
 	changes := readChanges(t, dir)
 	filtered := engine.FilterChanges(cfg, workspace, assertions, changes)
@@ -233,11 +337,17 @@ func assemble(t *testing.T, dir string) llm.ReviewRequest {
 		t.Fatalf("the filter kept none of the case's %d change(s); the review would assess nothing", len(changes))
 	}
 
+	outcome := cloudContext(t, cfg, workspace, assertions, fx)
+	if fx != nil && fx.status == 0 && !fx.hang && !outcome.Connected {
+		t.Fatalf("the cloud fixture did not connect: %s", outcome.Degraded)
+	}
+
 	assembly := engine.AssembleRequest(cfg, engine.RequestInput{
 		Workspace:     workspace,
 		Assertions:    assertions,
 		Kept:          filtered.Kept,
 		ManifestFacts: deps.Facts(filtered.Kept),
+		Library:       outcome.Library,
 	})
 	// The action turns both of these into comment notes and reviews what is
 	// left. A corpus case is a fixed input that is supposed to fit, so either
@@ -303,6 +413,63 @@ func TestCorpusAssembles(t *testing.T) {
 				}) {
 					t.Errorf("context stuffing did not send %s, which this case depends on", want)
 				}
+			}
+
+			// A cloud case sends the library, the addendum and the cloud
+			// schema together; a local case sends none of the three. Half a
+			// cloud request is the failure this guards against.
+			if readCloudFixture(t, dir) != nil {
+				if request.Library == "" || !strings.Contains(request.Prompt, "library_refs") ||
+					string(request.Schema) != string(findings.CloudSchemaJSON) {
+					t.Error("cloud case assembled without the library, the addendum or the cloud schema")
+				}
+				for _, want := range expected.Findings {
+					if want.LibraryRefs == nil {
+						continue
+					}
+					for _, ref := range *want.LibraryRefs {
+						if !strings.Contains(request.Library, ref+" |") {
+							t.Errorf("the library sent never lists %s, but the case expects it cited", ref)
+						}
+					}
+				}
+			} else if request.Library != "" || string(request.Schema) != string(findings.SchemaJSON) {
+				t.Error("local case assembled a cloud request")
+			}
+		})
+	}
+}
+
+// TestCorpusDegradedMatchesLocal: when the context call fails, the request is
+// the local one to the byte — same digest, same prompt, same schema — so a
+// degraded run cannot send a cloud prompt with a local schema or the reverse,
+// and the local recordings stay valid for it. Free, and run on every case
+// that has a cloud fixture.
+func TestCorpusDegradedMatchesLocal(t *testing.T) {
+	for _, name := range caseNames(t) {
+		dir := filepath.Join(corpusDir(t), name)
+		if readCloudFixture(t, dir) == nil {
+			continue
+		}
+		t.Run(name, func(t *testing.T) {
+			local := assembleWith(t, dir, nil)
+			for _, fx := range []*cloudFixture{
+				{status: http.StatusUnauthorized, code: "token_invalid"},
+				{status: http.StatusForbidden, code: "upgrade_required"},
+				{status: http.StatusInternalServerError, code: "internal_error"},
+				{hang: true},
+			} {
+				degraded := assembleWith(t, dir, fx)
+				if fixture.Digest(degraded) != fixture.Digest(local) {
+					t.Errorf("status %d hang=%t: degraded digest differs from local", fx.status, fx.hang)
+				}
+				if degraded.Prompt != local.Prompt || string(degraded.Schema) != string(local.Schema) {
+					t.Errorf("status %d hang=%t: degraded prompt or schema differs from local", fx.status, fx.hang)
+				}
+			}
+			connected := assemble(t, dir)
+			if fixture.Digest(connected) == fixture.Digest(local) {
+				t.Error("the connected request should differ from the local one")
 			}
 		})
 	}
@@ -487,6 +654,9 @@ func hasFinding(report *findings.Report, want expectedFinding) bool {
 		if want.ModelFile != "" && finding.ModelExcerpt.File != want.ModelFile {
 			continue
 		}
+		if want.LibraryRefs != nil && !refsMatch(finding.LibraryRefs, *want.LibraryRefs) {
+			continue
+		}
 		for _, evidence := range finding.Evidence {
 			if evidence.File == want.EvidenceFile {
 				return true
@@ -494,6 +664,21 @@ func hasFinding(report *findings.Report, want expectedFinding) bool {
 		}
 	}
 	return false
+}
+
+// refsMatch: every expected ref is cited, and an empty expectation means
+// nothing may be. Extra refs beyond a non-empty expectation are judgement and
+// pass, as extra findings do.
+func refsMatch(got, want []string) bool {
+	if len(want) == 0 {
+		return len(got) == 0
+	}
+	for _, ref := range want {
+		if !slices.Contains(got, ref) {
+			return false
+		}
+	}
+	return true
 }
 
 // describe summarises a report for failure messages: every finding as
@@ -508,8 +693,12 @@ func describe(report *findings.Report) string {
 		for _, evidence := range finding.Evidence {
 			files = append(files, evidence.File)
 		}
-		parts = append(parts, fmt.Sprintf("%s @ %s (model: %s)",
-			finding.Category, strings.Join(files, ", "), or(finding.ModelExcerpt.File, "none")))
+		refs := ""
+		if finding.LibraryRefs != nil {
+			refs = fmt.Sprintf(" refs=%v", finding.LibraryRefs)
+		}
+		parts = append(parts, fmt.Sprintf("%s @ %s (model: %s)%s",
+			finding.Category, strings.Join(files, ", "), or(finding.ModelExcerpt.File, "none"), refs))
 	}
 	return strings.Join(parts, "; ")
 }

@@ -169,14 +169,14 @@ func TestLocationOmitsUnknownLine(t *testing.T) {
 
 func TestCheckConclusion(t *testing.T) {
 	clean := &findings.Report{NoDrift: true}
-	if conclusion, _ := CheckConclusion(clean, config.FailNever); conclusion != "success" {
+	if conclusion, _ := CheckConclusion(clean, config.FailNever, PolicyGate{}); conclusion != "success" {
 		t.Errorf("clean conclusion = %q, want success", conclusion)
 	}
 
 	// No findings but partial coverage must not show a green check: that would
 	// assert a clean bill of health the comment deliberately does not give.
 	partial := &findings.Report{NoDrift: false, Summary: "only dependency checks ran"}
-	conclusion, title := CheckConclusion(partial, config.FailNever)
+	conclusion, title := CheckConclusion(partial, config.FailNever, PolicyGate{})
 	if conclusion != "neutral" {
 		t.Errorf("partial-coverage conclusion = %q, want neutral", conclusion)
 	}
@@ -187,17 +187,17 @@ func TestCheckConclusion(t *testing.T) {
 	actionRequired := &findings.Report{Findings: []findings.Finding{
 		{Severity: findings.SeverityActionRequired},
 	}}
-	if conclusion, _ := CheckConclusion(actionRequired, config.FailNever); conclusion != "neutral" {
+	if conclusion, _ := CheckConclusion(actionRequired, config.FailNever, PolicyGate{}); conclusion != "neutral" {
 		t.Errorf("default conclusion = %q, want neutral", conclusion)
 	}
-	if conclusion, _ := CheckConclusion(actionRequired, config.FailOnActionRequired); conclusion != "failure" {
+	if conclusion, _ := CheckConclusion(actionRequired, config.FailOnActionRequired, PolicyGate{}); conclusion != "failure" {
 		t.Errorf("opt-in fail conclusion = %q, want failure", conclusion)
 	}
 
 	reviewOnly := &findings.Report{Findings: []findings.Finding{
 		{Severity: findings.SeverityReviewRecommended},
 	}}
-	if conclusion, _ := CheckConclusion(reviewOnly, config.FailOnActionRequired); conclusion != "neutral" {
+	if conclusion, _ := CheckConclusion(reviewOnly, config.FailOnActionRequired, PolicyGate{}); conclusion != "neutral" {
 		t.Errorf("review-only under fail-on-action-required = %q, want neutral", conclusion)
 	}
 }

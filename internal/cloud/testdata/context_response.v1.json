@@ -1,0 +1,170 @@
+{
+  "schema": 1,
+  "org": {
+    "slug": "acme",
+    "tier": "team"
+  },
+  "models": [
+    {
+      "slug": "payments",
+      "id": "0b9c6f1e-4d2a-4c3b-9e8f-1a2b3c4d5e6f",
+      "version": "1.0.6",
+      "repository_match": true,
+      "alignment": {
+        "state": "aligned",
+        "base_matches": "1.0.6",
+        "versions_behind": 0,
+        "segments": [
+          {"segment": "default", "state": "aligned", "base_matches": "1.0.6", "versions_behind": 0},
+          {"segment": "auth", "state": "aligned", "base_matches": "1.0.6", "versions_behind": 0}
+        ],
+        "delta": null
+      },
+      "policy": {
+        "evaluated": 2,
+        "enforced": 1,
+        "violated": 0,
+        "blocking": 0,
+        "results": [
+          {"policy_name": "Controls required", "severity": "error", "enforced": true, "passed": true, "message": "All threats have at least one control."},
+          {"policy_name": "Description present", "severity": "warning", "enforced": false, "passed": true, "message": "Threat model has a description."}
+        ]
+      },
+      "notes": []
+    },
+    {
+      "slug": "checkout",
+      "id": "1c0d7e2f-5e3b-4d4c-8f9a-2b3c4d5e6f70",
+      "version": "2.1.0",
+      "repository_match": false,
+      "alignment": {
+        "state": "ahead",
+        "base_matches": "2.1.0",
+        "versions_behind": 0,
+        "segments": [
+          {"segment": "default", "state": "ahead", "base_matches": "2.1.0", "versions_behind": 0}
+        ],
+        "delta": null
+      },
+      "policy": {
+        "evaluated": 1,
+        "enforced": 1,
+        "violated": 1,
+        "blocking": 1,
+        "results": [
+          {"policy_name": "Controls required", "severity": "error", "enforced": true, "passed": false, "message": "1 threat(s) have no controls defined."}
+        ]
+      },
+      "notes": ["org_mismatch", "repository_mismatch", "unplaced_file:threatmodels/stray.tm.hcl"]
+    },
+    {
+      "slug": "ledger",
+      "id": "2d1e8f30-6f4c-4e5d-9a0b-3c4d5e6f7081",
+      "version": "1.0.6",
+      "repository_match": null,
+      "alignment": {
+        "state": "behind",
+        "base_matches": "1.0.4",
+        "versions_behind": 2,
+        "segments": [
+          {"segment": "default", "state": "aligned", "base_matches": "1.0.6", "versions_behind": 0},
+          {"segment": "auth", "state": "behind", "base_matches": "1.0.4", "versions_behind": 2}
+        ],
+        "delta": {
+          "controls": {"removed": ["brute force login::lockout"]},
+          "threats": {"modified": ["brute force login"]}
+        }
+      },
+      "policy": null,
+      "notes": ["no_policies"]
+    },
+    {
+      "slug": "refunds",
+      "id": "3e2f9041-7a5d-4f6e-8b1c-4d5e6f708192",
+      "version": "1.2.0",
+      "repository_match": true,
+      "alignment": {
+        "state": "conflict",
+        "base_matches": "1.1.0",
+        "versions_behind": 3,
+        "segments": [
+          {"segment": "default", "state": "conflict", "base_matches": "1.1.0", "versions_behind": 3}
+        ],
+        "delta": {
+          "assets": {"added": ["refund ledger"]},
+          "controls": {"added": ["refund approval::four eyes"], "removed": ["refund approval::manual review"]}
+        }
+      },
+      "policy": {
+        "evaluated": 1,
+        "enforced": 0,
+        "violated": 1,
+        "blocking": 0,
+        "results": [
+          {"policy_name": "STRIDE coverage", "severity": "warning", "enforced": false, "passed": false, "message": "No threats cover Repudiation."}
+        ]
+      },
+      "notes": ["partial_set"]
+    },
+    {
+      "slug": "reporting",
+      "id": "4f30a152-8b6e-4a7f-9c2d-5e6f708192a3",
+      "version": "1.0.0",
+      "repository_match": true,
+      "alignment": {
+        "state": "unsynced",
+        "base_matches": null,
+        "versions_behind": 0,
+        "segments": [
+          {"segment": "default", "state": "unsynced", "base_matches": null, "versions_behind": 0}
+        ],
+        "delta": null
+      },
+      "policy": null,
+      "notes": ["policy_unavailable"]
+    },
+    {
+      "slug": "settlement",
+      "id": "5a41b263-9c7f-4b80-8d3e-6f708192a3b4",
+      "version": "3.0.0",
+      "repository_match": true,
+      "alignment": {
+        "state": "conflict",
+        "base_matches": "2.4.1",
+        "versions_behind": 1,
+        "segments": [
+          {"segment": "default", "state": "conflict", "base_matches": "2.4.1", "versions_behind": 1}
+        ],
+        "delta": null
+      },
+      "policy": null,
+      "notes": ["head_parse_error"]
+    },
+    {
+      "slug": "ledger-v2",
+      "id": null,
+      "version": null,
+      "repository_match": null,
+      "alignment": {
+        "state": "not_in_cloud",
+        "base_matches": null,
+        "versions_behind": 0,
+        "segments": [],
+        "delta": null
+      },
+      "policy": null,
+      "notes": ["not_in_cloud"]
+    }
+  ],
+  "library": {
+    "threats": [
+      {"reference_id": "T-001", "name": "Account takeover"},
+      {"reference_id": "T-002", "name": "Card skimming"}
+    ],
+    "controls": [
+      {"reference_id": "C-001", "name": "Multi-factor authentication"},
+      {"reference_id": "C-002", "name": "Content security policy"}
+    ],
+    "truncated": true
+  }
+}

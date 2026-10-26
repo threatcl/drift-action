@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "org": {"slug": "corpus", "tier": "team"},
+  "models": [],
+  "library": {
+    "threats": [
+      {"reference_id": "T-PHYS-001", "name": "Tailgating into the data centre"},
+      {"reference_id": "T-PHYS-002", "name": "Theft of an unencrypted backup tape"},
+      {"reference_id": "T-PHYS-003", "name": "Visitor left unescorted in a server room"}
+    ],
+    "controls": [
+      {"reference_id": "C-PHYS-001", "name": "Badge access logs reviewed weekly"},
+      {"reference_id": "C-PHYS-002", "name": "Mantrap at the data centre entrance"}
+    ],
+    "truncated": false
+  }
+}

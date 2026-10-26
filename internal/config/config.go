@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,6 +17,43 @@ const (
 	FailNever            = "never"
 	FailOnActionRequired = "on-action-required"
 )
+
+// Policy fail modes accepted in the cloud block. Separate from fail_mode: a
+// repo will want both gates, and a third fail_mode value would make them
+// exclusive.
+const (
+	PolicyFailNever               = "never"
+	PolicyFailOnEnforcedViolation = "on-enforced-violation"
+)
+
+// Cloud-connected mode is turned on by the token and nothing else. Both names
+// are the threatcl CLI's, already shell-friendly, so action.yml forwards the
+// threatcl-api-token input as THREATCL_API_TOKEN and a local run sets it by
+// hand.
+//
+// The API URL is read from the environment only, never from .threatcl-ci.hcl:
+// that file arrives in the pull request under review, and a URL in it would
+// let a pull request send the organisation's token to a host of its choosing.
+const (
+	CloudTokenEnv = "THREATCL_API_TOKEN"
+	CloudURLEnv   = "THREATCL_API_URL"
+	// DefaultCloudURL is the CLI's default host, baked in as the CLI bakes it.
+	DefaultCloudURL = "https://beta-api.threatcl.com"
+)
+
+// Cloud holds the cloud {} block of .threatcl-ci.hcl. Declared records that
+// the block was present at all: with no token in the run — a fork or
+// Dependabot pull request — a repo that configured cloud mode is told it was
+// not connected, while a repo that never did hears nothing about it.
+type Cloud struct {
+	Declared bool
+	// Model is the cloud model slug the repo's files link to. It overrides a
+	// backend block's threatmodel; the two contradicting is a hard error.
+	Model string
+	// PolicyFailMode decides whether an enforced policy violation fails the
+	// check run.
+	PolicyFailMode string
+}
 
 // DefaultConfigPath is the repo-relative location of the drift config file.
 const DefaultConfigPath = ".threatcl-ci.hcl"
@@ -103,10 +142,17 @@ type Config struct {
 	// NarrowAbove is the changed-file count above which the diff is narrowed
 	// to security-relevant paths. Below it every non-noise file is reviewed.
 	NarrowAbove int
-	// DryRun suppresses every GitHub write. The diff is still fetched and the
-	// comment and check run are still rendered and logged — they are just
-	// never posted. It does not change the verdict or the exit code.
+	// DryRun suppresses every GitHub write and the cloud write-back. The diff
+	// is still fetched, the cloud context is still read, and the comment and
+	// check run are still rendered and logged — they are just never posted.
+	// It does not change the verdict or the exit code.
 	DryRun bool
+	// Cloud is the cloud {} block. Whether cloud mode runs is decided by the
+	// token in the environment (CloudTokenEnv), not by this block.
+	Cloud Cloud
+	// CloudURL is the Threatcl Cloud API base. Environment only, see
+	// CloudURLEnv; https unless the host is loopback.
+	CloudURL string
 }
 
 func Default() Config {
@@ -120,6 +166,8 @@ func Default() Config {
 		MaxPatchBytes:   400_000,
 		MaxContextBytes: 200_000,
 		NarrowAbove:     diff.DefaultNarrowAbove,
+		Cloud:           Cloud{PolicyFailMode: PolicyFailNever},
+		CloudURL:        DefaultCloudURL,
 	}
 	// Complete, not half-built: a caller that uses Default() on its own — the
 	// finding-quality corpus does — gets a config it can actually review with.
@@ -169,6 +217,9 @@ func (c Config) FromEnv() (Config, error) {
 	}
 	if v := os.Getenv("INPUT_MODEL"); v != "" {
 		c.Model = v
+	}
+	if v := os.Getenv(CloudURLEnv); v != "" {
+		c.CloudURL = v
 	}
 
 	dryRun, set, err := boolEnv("INPUT_DRY-RUN", DryRunEnv)
@@ -239,6 +290,33 @@ func (c Config) validate() error {
 	if c.FailMode != FailNever && c.FailMode != FailOnActionRequired {
 		return fmt.Errorf("fail_mode must be %q or %q, got %q",
 			FailNever, FailOnActionRequired, c.FailMode)
+	}
+	if err := ValidateCloudURL(c.CloudURL); err != nil {
+		return fmt.Errorf("%s: %w", CloudURLEnv, err)
+	}
+	return nil
+}
+
+// ValidateCloudURL accepts an https URL, or http to a loopback host for a
+// local API. The token travels in every request to this host, so plain http
+// anywhere else would put it on the wire in clear — and the host is the
+// workflow's to set, never the pull request's.
+func ValidateCloudURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("%q is not a URL: %w", raw, err)
+	}
+	if u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return fmt.Errorf("%q must be an http(s) URL with a host", raw)
+	}
+	if u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%q must carry no credentials, query or fragment", raw)
+	}
+	if u.Scheme == "http" {
+		host := u.Hostname()
+		if ip := net.ParseIP(host); host != "localhost" && (ip == nil || !ip.IsLoopback()) {
+			return fmt.Errorf("%q is plain http to a non-loopback host; the API token would travel in clear", raw)
+		}
 	}
 	return nil
 }

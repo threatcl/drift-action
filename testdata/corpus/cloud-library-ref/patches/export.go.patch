@@ -1,0 +1,20 @@
+@@ -0,0 +1,19 @@
++package httpapi
++
++import (
++	"encoding/csv"
++	"net/http"
++)
++
++// exportHandler streams every user row as CSV.
++func exportHandler(store *Store) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		w.Header().Set("Content-Type", "text/csv")
++		cw := csv.NewWriter(w)
++		defer cw.Flush()
++		cw.Write([]string{"id", "email", "created_at"})
++		for _, u := range store.Users() {
++			cw.Write([]string{u.ID, u.Email, u.CreatedAt})
++		}
++	})
++}

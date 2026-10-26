@@ -22,6 +22,8 @@ type Assertions struct {
 	Sources []string
 	Wrapped *spec.ThreatmodelWrapped
 	Lines   *LineIndex
+	// backends is each file's cloud address, see Backends.
+	backends []Backend
 }
 
 // Load parses a .tm.hcl file via threatcl/spec and indexes its source lines.
@@ -61,6 +63,14 @@ func LoadSet(root string, rels []string) (*Assertions, error) {
 		return loadFile(filepath.Join(root, rels[0]), rels[0])
 	}
 	return loadSet(root, rels, contents)
+}
+
+// ReadFiles returns the contents of the set's files at rels inside root, under
+// the same confinement as loading them. Cloud-connected mode sends these bytes
+// to Threatcl Cloud, so the rule that kept a pull request from choosing a
+// runner file to disclose to the LLM provider holds for this recipient too.
+func ReadFiles(root string, rels []string) ([][]byte, error) {
+	return readConfined(root, rels)
 }
 
 // readConfined reads each model file through an os.Root opened on the
@@ -114,10 +124,12 @@ func loadFile(fsPath, displayPath string) (*Assertions, error) {
 		return nil, fmt.Errorf("parsing %s: %w", displayPath, explain(err))
 	}
 
+	files := []sourceFile{{path: fsPath, display: displayPath}}
 	return &Assertions{
-		Sources: []string{displayPath},
-		Wrapped: wrapped,
-		Lines:   buildLineIndex([]sourceFile{{path: fsPath, display: displayPath}}),
+		Sources:  []string{displayPath},
+		Wrapped:  wrapped,
+		Lines:    buildLineIndex(files),
+		backends: backendsOf(wrapped, files),
 	}, nil
 }
 
@@ -147,9 +159,10 @@ func loadSet(root string, rels []string, contents [][]byte) (*Assertions, error)
 	}
 
 	return &Assertions{
-		Sources: rels,
-		Wrapped: wrapped,
-		Lines:   buildLineIndex(files),
+		Sources:  rels,
+		Wrapped:  wrapped,
+		Lines:    buildLineIndex(files),
+		backends: backendsOf(wrapped, files),
 	}, nil
 }
 

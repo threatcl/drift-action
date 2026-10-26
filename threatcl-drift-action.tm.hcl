@@ -31,19 +31,29 @@ threatmodel "threatcl-drift-action" {
     information_classification = "Restricted"
   }
 
+  information_asset "Threatcl Cloud API token" {
+    description                = "The organisation-scoped tcl_ token that turns cloud-connected mode on, forwarded by action.yml as THREATCL_API_TOKEN when the workflow supplies the threatcl-api-token input. internal/cloud/client.go sends it as a bearer header on two routes only — the context read and the counts-only review write-back — and to one host only: the API URL comes from THREATCL_API_URL in the workflow environment with a built-in default, never from .threatcl-ci.hcl, and the client follows no redirect. Absent on fork and Dependabot pull requests, which then run local mode with a note"
+    information_classification = "Restricted"
+  }
+
+  information_asset "organisation library and policy context" {
+    description                = "What Threatcl Cloud returns in cloud-connected mode: the org library's reference ids and names, which go into the ORG LIBRARY prompt section and so to the LLM provider; the alignment delta, whose identifiers are threat and control names from the organisation's cloud copy of the model; and policy names, severities and messages. The latter two render into the pull request comment, visible to anyone who can read it, which is the same exposure as review findings"
+    information_classification = "Confidential"
+  }
+
   usecase {
     description = "A pull request triggers a drift review: the action fetches the diff via the GitHub compare API, sends it with targeted context to the LLM, and posts a sticky comment plus a check run describing any drift"
   }
 
   threat "Prompt injection via PR-controlled diff or context files" {
     ref         = "TCL-T-LLM-PROMPTINJ"
-    description = "A PR author embeds instructions or counterfeit section markers in any PR-controlled prompt input to suppress drift findings or forge evidence citations that the evidence sanitizer cannot distinguish from real ones. internal/llm/sections.go builds the prompt from three: the diff, the repo files selected as context, and the THREAT MODEL ASSERTIONS section, which internal/model/render.go renders from what the assessed threat model files declare — names, descriptions and implementation notes, read from the pull request's own checkout. Which files those are is PR-controlled as well: model_paths in the pull request's .threatcl-ci.hcl may list several, parsed by internal/model/model.go as one set. In that section names are quoted and field text is label-prefixed and indented, but a model's top-level description is rendered as-is, so its lines can begin with a counterfeit section marker; ids are held to identifier syntax by threatcl/spec, and the extends line is the engine's own wording. 'Schema-forced JSON and evidence sanitization' and 'Model output reaches only the report body' bound all three inputs alike. 'Threat model files are read only from inside the checkout', under the 'Repo source and diff shared with the LLM provider' threat, bounds only which files can be read, not what their prose says"
+    description = "A PR author embeds instructions or counterfeit section markers in any PR-controlled prompt input to suppress drift findings or forge evidence citations that the evidence sanitizer cannot distinguish from real ones. internal/llm/sections.go builds the prompt from three PR-controlled inputs: the diff, the repo files selected as context, and the THREAT MODEL ASSERTIONS section, which internal/model/render.go renders from what the assessed threat model files declare — names, descriptions and implementation notes, read from the pull request's own checkout. Cloud-connected mode adds a fourth, ORG LIBRARY, which is org-authored rather than PR-controlled: renderLibrary in internal/engine/cloud.go folds every entry name onto one line so it cannot start a counterfeit section marker, and PruneLibraryRefs holds the model's citations to the ids that were sent. Which files those are is PR-controlled as well: model_paths in the pull request's .threatcl-ci.hcl may list several, parsed by internal/model/model.go as one set. In that section names are quoted and field text is label-prefixed and indented, but a model's top-level description is rendered as-is, so its lines can begin with a counterfeit section marker; ids are held to identifier syntax by threatcl/spec, and the extends line is the engine's own wording. 'Schema-forced JSON and evidence sanitization' and 'Model output reaches only the report body' bound all three inputs alike. 'Threat model files are read only from inside the checkout', under the 'Repo source and diff shared with the LLM provider' threat, bounds only which files can be read, not what their prose says"
     impacts     = ["Integrity"]
     stride      = ["Tampering", "Spoofing"]
 
     control "Schema-forced JSON and evidence sanitization" {
       ref            = "TCL-C-LLM-SCHEMA"
-      description    = "Output must validate against the findings-v0 schema in internal/findings/validate.go; findings.Sanitize in internal/findings/schema.go drops evidence-free findings in code, not just in the prompt"
+      description    = "Output must validate against the schema the request carried — findings-v0 locally, findings-v0-cloud (v0 plus a required library_refs array) when an org library was sent — through findings.ParseWith in internal/findings/validate.go, in every provider and in the fixture player alike; findings.Sanitize in internal/findings/schema.go drops evidence-free findings in code, not just in the prompt, and PruneLibraryRefs does the same for a library reference the model was not sent"
       implemented    = true
       risk_reduction = 40
     }
@@ -133,14 +143,48 @@ threatmodel "threatcl-drift-action" {
 
   threat "Repo source and diff shared with the LLM provider" {
     ref         = "TCL-T-LLM-DATASHARE"
-    description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the configured LLM provider as a condition of every review — the Anthropic API by default, or the OpenAI API or the Gemini API when llm.provider selects one, each recorded as its own third_party_dependency. The files chosen are exactly the ones that back the model's controls and threats, so the disclosure is targeted rather than incidental. Which third party receives it is a repository's own configuration choice, and nothing in the engine constrains that choice beyond the provider having to be one it implements"
-    impacts     = ["Confidentiality"]
-    stride      = ["Info Disclosure"]
+    description = "Context stuffing transmits full contents of security-relevant repo files and the PR diff to the configured LLM provider as a condition of every review — the Anthropic API by default, or the OpenAI API or the Gemini API when llm.provider selects one, each recorded as its own third_party_dependency. The files chosen are exactly the ones that back the model's controls and threats, so the disclosure is targeted rather than incidental. Which third party receives it is a repository's own configuration choice, and nothing in the engine constrains that choice beyond the provider having to be one it implements. Cloud-connected mode adds a second disclosure in the same direction: with a Threatcl API token, the organisation's library — every published threat and control that carries a reference id, names only — is rendered by internal/engine/cloud.go into an ORG LIBRARY prompt section and sent to that same provider, so the model can cite entries in library_refs. It is the customer's data going to the customer's provider under the customer's key, and it is stated in the README. It also adds a disclosure in the other direction, bounded structurally rather than by convention: the threat model HCL itself — base and head copies of every linked file — goes to Threatcl Cloud for the alignment and policy context, and nothing else can: internal/cloud imports nothing from this module, so it cannot be handed a diff or a context file, and TestCloudNeverSeesCode in internal/engine/cloud_test.go plants a marker in the diff and a context file and asserts it reaches no request to cloud"
+    impacts                = ["Confidentiality"]
+    stride                 = ["Info Disclosure"]
+    information_asset_refs = ["repository source code", "organisation library and policy context"]
 
     control "Threat model files are read only from inside the checkout" {
       description    = "model_paths is read from the pull request's own .threatcl-ci.hcl, so which model files are parsed, and whose declared content is rendered into the prompt, is PR-controlled. internal/model/model.go refuses an entry that is not a local relative path and reads every model file through an os.Root opened on the checkout, which also refuses a symlink resolving outside it — whether model_paths or discovery named the file, on both the single-file and multi-file routes. Not covered: including and imports inside a model are resolved by threatcl/spec, outside this check; and context stuffing has its own guard in internal/llm/context.go, which compares paths lexically and follows symlinks"
       implemented    = true
       risk_reduction = 20
+    }
+  }
+
+  threat "API token exfiltrated through a PR-controlled cloud URL" {
+    description            = "Cloud-connected mode sends the Threatcl Cloud API token as a bearer header on every call. If the host it is sent to could be chosen by the pull request — a cloud { api_url = … } attribute in .threatcl-ci.hcl, which the pull request edits, or a redirect from the configured host — a pull request could have the runner post the organisation's token to an endpoint of its choosing, and with it read the org's library and policy state and write to its review ledger"
+    impacts                = ["Confidentiality"]
+    stride                 = ["Info Disclosure", "Spoofing"]
+    information_asset_refs = ["Threatcl Cloud API token"]
+
+    control "Cloud URL is workflow-only and redirects are refused" {
+      description    = "internal/config/config.go reads the API URL from THREATCL_API_URL alone, and the cloud block in internal/config/hcl.go declares no api_url attribute, so gohcl refuses one as an unknown argument and the run fails before anything is fetched (TestCloudBlockRefusesURL). The URL must be https unless its host is loopback, so the token never travels in clear to a remote host. internal/cloud/client.go refuses every redirect — same host or another — so a response cannot choose where the Authorization header is re-sent"
+      implemented    = true
+      risk_reduction = 70
+    }
+  }
+
+  threat "PR-selected cloud model quoted back in the review" {
+    description            = "cloud.model in .threatcl-ci.hcl, and the backend block in the model files, are both pull-request controlled, so a pull request can link the repository's files to any model slug in the token's organisation and have that model's alignment state, delta and policy verdict quoted in the comment. The token's org scope bounds what can be reached: another organisation's model is never observable, because the server resolves the slug within the token's org whatever backend_org claims and notes the mismatch. Accepted as a residual of the same class as model_paths: the comment always names the cloud model used and the files linked to it, so a reader can see the link, and a contradiction between cloud.model and a backend block is a hard error rather than a quiet re-link"
+    impacts                = ["Integrity"]
+    stride                 = ["Spoofing"]
+    information_asset_refs = ["review findings"]
+  }
+
+  threat "Cloud-sourced text rendered into the comment" {
+    description = "Three kinds of text from Threatcl Cloud reach the pull request comment: policy result messages, which are org-authored but can interpolate model content the pull request controls; library entry names, which are org-authored; and delta identifiers, which are threat and control names from both copies of the model. Rendered raw, any of them could inject markdown, break out of its line, or forge a section of the comment. Separately, the model's own library_refs are its output: a hallucinated reference id written into a threat model is worse than none"
+    impacts                = ["Integrity"]
+    stride                 = ["Tampering"]
+    information_asset_refs = ["organisation library and policy context", "review findings"]
+
+    control "Cloud text is escaped, capped, and refs come from our index" {
+      description    = "internal/render/cloud.go renders policy messages inside a single code span with backticks and newlines removed and the length capped; policy and library names with markdown escaped; delta identifiers quoted on one line; and org slugs, model slugs and segment names — server-validated identifiers — inside code spans with backticks and newlines removed. Notes render from a closed set of our own wording with an unknown note shown generically and escaped. internal/findings/schema.go's PruneLibraryRefs drops any library_refs value not in the index the model was sent — the same shape as the evidence rule — and the renderer prints the reference id and name from that index, never the model's spelling. With no library every ref is dropped"
+      implemented    = true
+      risk_reduction = 60
     }
   }
 
@@ -170,7 +214,7 @@ threatmodel "threatcl-drift-action" {
 
     control "Replay disclosure and schema re-validation" {
       ref            = "TCL-C-LLM-PROVENANCE"
-      description    = "Replayed runs set ContextInfo.Replayed, rendering an above-the-fold warning, and internal/llm/fixture/fixture.go re-validates the recorded report through findings.Parse in internal/findings/validate.go against the findings schema — a fixture is never trusted more than a live response. Both callers share that player, so the corpus replay path in internal/corpus/corpus_test.go re-validates against the schema identically; what does not carry over is the disclosure half, and it does not need to, because that path asserts in a test rather than rendering — a corpus recording can never influence a rendered pull request comment, a check run or an action output"
+      description    = "Replayed runs set ContextInfo.Replayed, rendering an above-the-fold warning, and internal/llm/fixture/fixture.go re-validates the recorded report through findings.ParseWith in internal/findings/validate.go against the schema the replaying request carries — v0 locally, v0-cloud when an org library was sent, so a local recording cannot pass for a cloud one or the reverse — and a fixture is never trusted more than a live response. Both callers share that player, so the corpus replay path in internal/corpus/corpus_test.go re-validates against the schema identically; what does not carry over is the disclosure half, and it does not need to, because that path asserts in a test rather than rendering — a corpus recording can never influence a rendered pull request comment, a check run or an action output"
       implemented    = true
       risk_reduction = 60
     }
@@ -233,8 +277,14 @@ threatmodel "threatcl-drift-action" {
     uptime_dependency = "hard"
   }
 
+  third_party_dependency "Threatcl Cloud API" {
+    description       = "Reached only when the workflow supplies a Threatcl API token. It receives the threat model HCL — base and head copies of every file linked to a cloud model — and a counts-only record of each review, and it answers with the model's alignment against version history, the organisation's policy verdict on the head copy, and the referenceable library. It never receives source code or a diff. Every failure degrades to the local review with a note; a run never fails because cloud was unreachable, so it is a soft dependency rather than a hard one, and dry-run suppresses the write-back"
+    saas              = true
+    uptime_dependency = "degraded"
+  }
+
   third_party_dependency "GitHub API" {
-    description       = "Source of the PR diff via the compare endpoint, and the write surface for the sticky comment and check run"
+    description       = "Source of the PR diff via the compare endpoint, and the write surface for the sticky comment and check run. In cloud-connected mode also the source of the base-commit copy of each linked threat model file, read through the contents endpoint by FileAt in internal/gh/client.go and forwarded to Threatcl Cloud for alignment; a read failure there degrades cloud mode rather than sending an absent base, which would read as never synced"
     saas              = true
     uptime_dependency = "hard"
   }
@@ -328,6 +378,14 @@ threatmodel "threatcl-drift-action" {
         trust_zone = "External APIs"
       }
 
+      # Threatcl Cloud, reached only with an API token. Its own element
+      # because its boundary is the inverse of the LLM providers': they get
+      # source and never the ledger, it gets the threat model and never the
+      # source. internal/cloud cannot be handed a diff by construction.
+      external_element "Threatcl Cloud API" {
+        trust_zone = "External APIs"
+      }
+
       # ghcr.io, where the engine image is published and from where every run
       # now pulls it. Modelled apart from "GitHub API" because it is a
       # different surface with a different failure mode — that element carries
@@ -399,6 +457,14 @@ threatmodel "threatcl-drift-action" {
       to   = "Drift Review Engine"
     }
 
+    # Cloud-connected mode only: the base-commit copy of each linked threat
+    # model file, read by FileAt through the contents endpoint and forwarded
+    # on the "threat model context call" flow below.
+    flow "base threat model fetch" {
+      from = "GitHub API"
+      to   = "Drift Review Engine"
+    }
+
     flow "review request with repo source" {
       from = "Drift Review Engine"
       to   = "Anthropic API"
@@ -420,6 +486,32 @@ threatmodel "threatcl-drift-action" {
     flow "sticky comment and check run" {
       from = "Drift Review Engine"
       to   = "GitHub API"
+    }
+
+    # Cloud-connected mode's read, before the diff is fetched: the linked
+    # threat model files, base and head, grouped by backend address, with the
+    # API token as a bearer header. What comes back is the alignment state,
+    # the delta, the policy verdict and the library; the library then rides
+    # the review-request flows above to the configured LLM provider.
+    flow "threat model context call" {
+      from = "Drift Review Engine"
+      to   = "Threatcl Cloud API"
+    }
+
+    # The answer. Alignment and policy go only to the renderer; the library
+    # also goes into the prompt.
+    flow "alignment, policy and library context" {
+      from = "Threatcl Cloud API"
+      to   = "Drift Review Engine"
+    }
+
+    # The write, after the review and before the comment is posted: counts,
+    # verdict, alignment per model, and enumerated strings only — every string
+    # field of the record is enum- or pattern-bounded, and a reflection test
+    # fails on one that is not. Skipped on a dry run and on a replayed review.
+    flow "counts-only review record" {
+      from = "Drift Review Engine"
+      to   = "Threatcl Cloud API"
     }
 
     # What now starts a release. Actions → release → Run workflow, carrying

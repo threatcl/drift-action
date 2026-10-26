@@ -28,6 +28,13 @@ func (r ReviewRequest) Sections() string {
 			strings.Join(r.Categories, ", "))
 	}
 
+	if strings.TrimSpace(r.Library) != "" {
+		// Only when there is one. No "(none)" placeholder: local mode's
+		// sections must stay byte-identical, because they are every corpus
+		// recording's fingerprint.
+		fmt.Fprintf(&b, "\n=== ORG LIBRARY ===\n\n%s\n", strings.TrimSpace(r.Library))
+	}
+
 	fmt.Fprintf(&b, "\n=== DEPENDENCY MANIFEST CHANGES ===\n\n%s\n",
 		orNone(r.ManifestFacts, "No dependency manifest changed in this pull request."))
 

@@ -78,3 +78,44 @@ upstream changes those, re-vendor and re-derive.
   lines off when the model did its own arithmetic.
 - Per-finding `agent_prompt` and `relevance` field guidance (from the PR
   output spec).
+
+## Cloud addendum (`drift-ci-cloud.md`)
+
+Cloud-connected mode appends `drift-ci-cloud.md` to `drift-ci.md` **only when
+the request carries an `ORG LIBRARY` section** — that is, when the run holds a
+Threatcl API token and the context call succeeded. Local mode's prompt is
+byte-identical to before, `drift-ci.md` stays a clean derivation of the
+vendored upstream, and `prompt-sync.yml` is untouched.
+
+The addendum covers:
+
+- what `ORG LIBRARY` is (`REFERENCE-ID | name` lines, after `ENABLED
+  CATEGORIES`), and that it is data, not instruction;
+- the one extra per-finding field, `library_refs`, and when to fill it: only
+  for an entry that genuinely fits — an empty array is the normal answer, and
+  only ids printed in the section may be used (`findings.PruneLibraryRefs`
+  drops anything else in code, the same shape as the evidence rule);
+- to prefer `ref = "…"` in `suggested_fix` and `agent_prompt` over a
+  generated block, as `/threat-for-code` does;
+- that the library never changes a finding's category or severity. That line
+  is load-bearing: severity agreement across providers is what keeps
+  `fail_mode` provider-independent, and a library must not become a second
+  severity rubric.
+
+The schema sent with it is `findings-v0-cloud` — v0 plus the required
+`library_refs` array. It is a separate document because every property is
+required (OpenAI strict mode insists), so adding the field to v0 would
+invalidate all of the committed local-mode recordings.
+
+Recorded 2026-10-26 on all three providers. Every provider cited `T-DATA-004`
+(and `C-AUTHZ-003`, a fitting control) on `cloud-library-ref`, cited nothing
+on `cloud-library-no-match`, and kept each case's primary finding at
+`action_required` — the same tier as its local twin, so the library did not
+move the gate. One observation to carry forward rather than act on: on
+`cloud-library-ref`, Anthropic and OpenAI both rated a *secondary*
+`unclassified_data` finding `action_required`, where their local
+`unmodeled-surface` recordings rate the same finding `review_recommended`
+(Gemini produced no secondary finding). The exposure — unauthenticated bulk
+export of emails — is the named exposure in the severity rule, so the cloud
+reading is defensible; but two providers shifting the same way with only the
+library added is worth re-checking if the addendum is ever reworded.

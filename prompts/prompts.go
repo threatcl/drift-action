@@ -11,6 +11,13 @@ import _ "embed"
 //go:embed drift-ci.md
 var DriftCI string
 
+// DriftCICloud is appended to DriftCI only when the request carries an ORG
+// LIBRARY section, so local mode's prompt stays byte-identical and drift-ci.md
+// stays a clean derivation of the vendored upstream.
+//
+//go:embed drift-ci-cloud.md
+var DriftCICloud string
+
 //go:embed upstream/threat-drift.md
 var UpstreamThreatDrift string
 

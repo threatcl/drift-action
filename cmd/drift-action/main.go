@@ -102,8 +102,19 @@ func run(ctx context.Context) error {
 	summary := assertions.Summary()
 	log.Printf("threat model: %s (%s)", strings.Join(summary.Paths, ", "), summary)
 
+	// A cloud.model that contradicts the files' backend blocks is a config
+	// error like any other, token or no token, and fails before the diff is
+	// fetched.
+	if _, err := engine.CloudLink(cfg, assertions); err != nil {
+		return err
+	}
+	cloudClient, err := newCloudClient(cfg)
+	if err != nil {
+		return err
+	}
+
 	if cfg.DryRun {
-		log.Printf("dry run: the diff will be fetched and the comment rendered, but nothing will be posted")
+		log.Printf("dry run: the diff will be fetched and the comment rendered, but nothing will be posted and no review record will be written")
 	}
 
 	token := os.Getenv("GITHUB_TOKEN")
@@ -115,6 +126,25 @@ func run(ctx context.Context) error {
 
 	fetchCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+
+	// Before the diff: the context call carries model HCL and never a diff,
+	// and nothing it learns can change what is fetched.
+	cloudOutcome := engine.CloudContext(fetchCtx, cfg, engine.CloudInput{
+		Client:     cloudClient,
+		Workspace:  prCtx.Workspace,
+		Repository: repositoryName(prCtx),
+		Assertions: assertions,
+		Base:       baseFetcher(client, prCtx.BaseSHA),
+	})
+	switch {
+	case cloudOutcome.Connected:
+		log.Printf("threatcl cloud: connected as %s; %d model(s) linked, library %d threats / %d controls",
+			cloudOutcome.Response.Org.Slug, len(cloudOutcome.Link.Models),
+			len(cloudOutcome.Response.Library.Threats), len(cloudOutcome.Response.Library.Controls))
+	case cloudOutcome.Degraded != "":
+		log.Printf("threatcl cloud: %s", cloudOutcome.Degraded)
+	}
+
 	comparison, err := client.Compare(fetchCtx, prCtx.BaseSHA, prCtx.HeadSHA)
 	if err != nil {
 		return err
@@ -127,7 +157,7 @@ func run(ctx context.Context) error {
 	manifestFacts := deps.Facts(filtered.Kept)
 	log.Printf("dependency manifest changes: %d", len(manifestFacts))
 
-	report, info := analyze(ctx, cfg, analysisInput{
+	report, info, llmModel := analyze(ctx, cfg, analysisInput{
 		workspace:     prCtx.Workspace,
 		source:        fmt.Sprintf("%s/%s#%d@%s", prCtx.Owner, prCtx.Repo, prCtx.Number, prCtx.HeadSHA),
 		summary:       summary,
@@ -135,6 +165,7 @@ func run(ctx context.Context) error {
 		filtered:      filtered,
 		comparison:    comparison,
 		manifestFacts: manifestFacts,
+		cloud:         cloudOutcome,
 	})
 
 	if dropped := findings.Sanitize(report); len(dropped) > 0 {
@@ -148,6 +179,34 @@ func run(ctx context.Context) error {
 			report.Summary = "Every finding this review produced was discarded for citing no code evidence, so nothing was confirmed."
 		}
 	}
+	// The library rule, enforced the same way: a ref the model was not sent
+	// is dropped before anything renders. With no library every ref goes.
+	known := func(ref string) bool { _, ok := cloudOutcome.Index[ref]; return ok }
+	if dropped := findings.PruneLibraryRefs(report, known); dropped > 0 {
+		log.Printf("dropped %d library ref(s) not in the library sent", dropped)
+		info.Notes = append(info.Notes,
+			fmt.Sprintf("Library rule: %d library reference(s) were discarded for naming no entry the model was sent", dropped))
+	}
+
+	// The write-back goes before the comment is rendered, so a failed one can
+	// still be disclosed in it. Nothing in it is free text. A dry run writes
+	// nothing anywhere, and a replayed review describes another diff.
+	if cloudOutcome.Connected {
+		switch {
+		case cfg.DryRun:
+			log.Printf("dry run: would record the review with threatcl cloud")
+		case info.Replayed:
+			log.Printf("replayed review: not recording it with threatcl cloud")
+		default:
+			rec := reviewRecord(cfg, prCtx, cloudOutcome, report, info, llmModel)
+			if err := cloudClient.ReportReview(ctx, rec); err != nil {
+				log.Printf("threatcl cloud: recording the review failed: %v", err)
+				info.Notes = append(info.Notes, "Threatcl Cloud: this review could not be recorded; see the action log")
+			} else {
+				log.Printf("threatcl cloud: review recorded")
+			}
+		}
+	}
 
 	body := render.Comment(report, info)
 	reportPath, err := writeReport(body)
@@ -155,7 +214,7 @@ func run(ctx context.Context) error {
 		log.Printf("warning: could not write report file: %v", err)
 	}
 
-	conclusion, title := render.CheckConclusion(report, cfg.FailMode)
+	conclusion, title := render.CheckConclusion(report, cfg.FailMode, info.Cloud.Gate())
 
 	if cfg.DryRun {
 		// Print the comment rather than posting it, so a dry run is useful on
@@ -182,12 +241,18 @@ func run(ctx context.Context) error {
 	}
 
 	actionRequired := countSeverity(report, findings.SeverityActionRequired)
-	writeOutputs(map[string]string{
+	outputs := map[string]string{
 		"findings-count":        fmt.Sprint(len(report.Findings)),
 		"action-required-count": fmt.Sprint(actionRequired),
 		"verdict":               verdict(report, actionRequired),
 		"report-path":           reportPath,
-	})
+	}
+	if info.Cloud != nil {
+		if evaluated, totals := policyTotals(info.Cloud); evaluated {
+			outputs["policy-violations-count"] = fmt.Sprint(totals.Violated)
+		}
+	}
+	writeOutputs(outputs)
 
 	log.Printf("%s (check run: %s)", title, conclusion)
 	if conclusion == "failure" {
@@ -208,16 +273,19 @@ type analysisInput struct {
 	filtered      diff.Result
 	comparison    *gh.CompareResult
 	manifestFacts []deps.Delta
+	// cloud is what the context call returned, or why it did not.
+	cloud engine.CloudOutcome
 }
 
 // analyze assembles the report for this build: it runs the review when there
 // is something to review and a key to review it with, and otherwise returns an
-// empty report that says so.
+// empty report that says so. The third value is the model that served the
+// review, for the cloud ledger; empty when none ran.
 //
 // Every early return here leaves NoDrift false. A report that found nothing
 // because it looked for nothing must never read as clean — only a model that
 // actually ran and judged the change consistent may set that flag.
-func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*findings.Report, render.ContextInfo) {
+func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*findings.Report, render.ContextInfo, string) {
 	info := render.ContextInfo{
 		ModelPaths:    in.summary.Paths,
 		ModelSummary:  in.summary.String(),
@@ -228,6 +296,9 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 		Narrowed:      in.filtered.Narrowed,
 		NarrowedOut:   in.filtered.NarrowedOut,
 		PatchOmitted:  in.comparison.PatchOmitted,
+		// Set before any early return: what cloud said about the model is
+		// true whether or not a review ran.
+		Cloud: cloudInfo(cfg, in.cloud),
 		// Everything filtered away is a coverage statement, not a clean bill
 		// of health — but a docs-only PR genuinely has no code to review, and
 		// neither does one touching only what the repo has excluded.
@@ -250,7 +321,7 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 
 	if len(in.filtered.Kept) == 0 {
 		info.AnalysisMode = "none — no changed file reached the review, so no drift category was assessed"
-		return unassessed("No changed file was reviewed, so nothing was assessed. See the context below for why."), info
+		return unassessed("No changed file was reviewed, so nothing was assessed. See the context below for why."), info, ""
 	}
 
 	// The cap applies to what would be sent to inference, after filtering and
@@ -266,7 +337,7 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 			len(in.filtered.Kept), cfg.MaxDiffFiles)
 		return unassessed(fmt.Sprintf(
 			"This diff is too large to review: %d file(s) needed review, over the configured cap of %d. Run `/threat-drift` locally with the threatcl claude-plugin to review it in full.",
-			len(in.filtered.Kept), cfg.MaxDiffFiles)), info
+			len(in.filtered.Kept), cfg.MaxDiffFiles)), info, ""
 	}
 
 	var provider llm.Provider
@@ -281,14 +352,14 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 				"none — %s is unset, so no drift category was assessed", cfg.APIKeyEnv)
 			return unassessed(fmt.Sprintf(
 				"No API key was supplied (%s is unset), so this pull request was not reviewed for drift.",
-				cfg.APIKeyEnv)), info
+				cfg.APIKeyEnv)), info, ""
 		}
 
 		live, err := engine.NewProvider(cfg, apiKey)
 		if err != nil {
 			log.Printf("error: %v", err)
 			info.AnalysisMode = fmt.Sprintf("none — %v", err)
-			return unassessed("This pull request was not reviewed for drift: the configured LLM provider could not be used."), info
+			return unassessed("This pull request was not reviewed for drift: the configured LLM provider could not be used."), info, ""
 		}
 		provider = live
 
@@ -303,6 +374,9 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 		Assertions:    in.assertions,
 		Kept:          in.filtered.Kept,
 		ManifestFacts: in.manifestFacts,
+		// Empty unless cloud mode connected, and then the request is a
+		// local one to the byte.
+		Library: in.cloud.Library,
 	})
 	if len(assembly.TooLarge) > 0 {
 		log.Printf("%d file(s) over the %d-byte patch budget were not sent: %s",
@@ -339,7 +413,7 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 		log.Printf("%v", refusal)
 		info.AnalysisMode = fmt.Sprintf("could not assess — %s declined this request%s",
 			or(refusal.Model, cfg.Model), bracket(refusal.Category))
-		return unassessed("The model declined to review this pull request, so it was not assessed for drift."), info
+		return unassessed("The model declined to review this pull request, so it was not assessed for drift."), info, ""
 
 	case err != nil:
 		// The full error goes to the run log only. A schema-validation failure
@@ -347,7 +421,7 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 		// so it must not be echoed into a comment on that pull request.
 		log.Printf("inference failed: %v", err)
 		info.AnalysisMode = "could not assess — " + failureKind(err) + "; see the action log"
-		return unassessed("Inference failed, so this pull request was not reviewed for drift."), info
+		return unassessed("Inference failed, so this pull request was not reviewed for drift."), info, ""
 	}
 
 	report := result.Report
@@ -379,7 +453,7 @@ func analyze(ctx context.Context, cfg config.Config, in analysisInput) (*finding
 			"Fallback: %s declined this request, and %s served the review in its place",
 			cfg.Model, result.Model))
 	}
-	return report, info
+	return report, info, result.Model
 }
 
 // unassessed builds the report for a run that produced no judgement. NoDrift

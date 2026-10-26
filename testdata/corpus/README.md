@@ -101,6 +101,17 @@ recordings and adding one must leave the others' baselines untouched.
                        a single space, never empty — the manifest parser
                        skips empty lines and line numbers desync.
   expected.json        what a good review must produce
+  cloud/context.json   optional: a recorded Threatcl Cloud context answer, in
+                       the shape of internal/cloud/testdata/context_response.v1.json.
+                       Its presence makes the case a cloud-connected review:
+                       the library it carries is sent, the prompt gains the
+                       cloud addendum and the schema gains library_refs. It
+                       is served by the fixture transport, which fails the
+                       test on any request it did not plan for — no case ever
+                       reaches a real cloud host
+  cloud/status         optional: force the context call to fail instead
+                       ("401", "403 upgrade_required", "timeout"), to check a
+                       case degrades to the local request
   recording.<provider>.json
                        written by record mode, one per provider; not committed
                        until it has been eyeballed
@@ -123,6 +134,15 @@ A finding may also carry `"model_file"`: the threat model file its excerpt
 must cite. Only a multi-file case has a wrong answer to that — citing the
 child for a control its parent declares sends the fix to a file that does not
 contain it — so single-file cases leave it out.
+
+A cloud case's finding may carry `"library_refs"`: every id listed must be
+cited, and `[]` means none may be. `cloud-library-ref` expects the one
+library entry that fits; `cloud-library-no-match` sends a library that fits
+nothing and expects an empty list — the clean case of the library feature.
+Both are the local cases they were copied from plus a `cloud/` directory, so
+the same diff is measured with and without a library. The free
+`TestCorpusDegradedMatchesLocal` also proves that a failed context call
+assembles the local request to the byte, for every cloud case.
 
 ## What is asserted, and what deliberately is not
 

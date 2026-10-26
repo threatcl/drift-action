@@ -91,6 +91,7 @@ This repository's own drift workflow pins the SHA, for exactly that reason.
 | `openai-api-key` | — | OpenAI API key, when `llm.provider` is `openai` |
 | `gemini-api-key` | — | Gemini API key, when `llm.provider` is `gemini` |
 | `github-token` | `${{ github.token }}` | Reads the PR diff, writes the comment/check |
+| `threatcl-api-token` | — | Threatcl Cloud API token; turns on [cloud-connected mode](#cloud-connected-mode) |
 | `fail-mode` | from config | `never` \| `on-action-required` |
 | `model` | from config | Override the LLM model |
 | `dry-run` | `false` | Render and log the review without posting anything |
@@ -179,6 +180,7 @@ files from that directory — point it at a stale tree and the review answers
 | `action-required-count` | Findings at the Action required tier |
 | `verdict` | `clean` \| `findings` \| `action-required` \| `unassessed` \| `skipped` \| `error` |
 | `report-path` | Path to the rendered markdown report (written under `RUNNER_TEMP`) |
+| `policy-violations-count` | Policy violations Threatcl Cloud reported; unset when not cloud-connected |
 
 `clean` is reserved for a run where the model actually assessed the change and
 found it consistent. A run that produced no findings because it assessed
@@ -212,6 +214,12 @@ ignore_paths = ["generated/", "*_gen.go", "examples/"]
 
 # never (default) | on-action-required
 fail_mode = "never"
+
+# Cloud-connected mode (needs the threatcl-api-token input). See below.
+cloud {
+  model            = "payments" # cloud model slug; omit when the backend block names it
+  policy_fail_mode = "never"    # never (default) | on-enforced-violation
+}
 
 llm {
   provider    = "anthropic"
@@ -295,6 +303,71 @@ model_paths = [
   paste — two unrelated models reviewed together would make one large, muddled
   review, so assessing them as a set is a choice you make here.
 
+### Cloud-connected mode
+
+With a [Threatcl Cloud](https://threatcl.com) API token (Team plan or above),
+the action also asks Threatcl Cloud about the threat model it is reviewing —
+in one call, before the diff is fetched — and reports a counts-only record of
+each review back. Inference is unchanged: your own Anthropic, OpenAI or Gemini
+key, the same single-shot request.
+
+```yaml
+- uses: threatcl/drift-action@v1
+  with:
+    anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+    threatcl-api-token: ${{ secrets.THREATCL_API_TOKEN }}
+```
+
+The token is what turns it on; nothing in `.threatcl-ci.hcl` does. What you
+get:
+
+- **Model alignment.** The repo's copy of the model is placed in the cloud
+  model's version history, base commit and PR head both, so the comment can
+  tell "this PR edits the model" from "the model has drifted from cloud".
+  When the repo is behind, or both sides have changed, a **Model sync** block
+  lists what differs — threats and controls cloud has that this copy lacks,
+  what was modified in cloud — with a copy-paste prompt to bring the file up
+  to date. A real conflict (pushing on merge would overwrite cloud edits)
+  warns above the fold. The action never pushes to cloud and never commits
+  the cloud copy into the PR.
+- **Library-aware suggestions.** The organisation's threat and control
+  library (reference ids and names) is sent to the model, and a finding that
+  matches a library entry says so — `Library match: T-AUTH-001 — Credential
+  stuffing` — with the agent prompt told to prefer `ref = "…"` over a new
+  block. Only ids that were actually sent are ever printed; anything else the
+  model says is discarded.
+- **Policy evaluation.** The organisation's enabled policies run against the
+  PR's copy of the model, server-side, and the comment lists every violation.
+  `policy_fail_mode = "on-enforced-violation"` makes an enforced, error-level
+  violation fail the check run, separately from `fail_mode`. If policies could
+  not be evaluated while that mode is set, the check is neutral and the
+  comment says so above the fold — you are told when a PR was not gated, and
+  the run is not failed over a cloud outage.
+- **Write-back.** After the review, a counts-only record — verdict, counts
+  per category, alignment per model, policy totals, files changed and
+  reviewed, provider and model — is recorded against the pull request. No
+  finding titles, excerpts, evidence, file paths or summaries: those are model
+  output shaped by your source code, and they stay in the PR.
+
+Which cloud model the files link to comes from the model files' `backend`
+block (`organization` and `threatmodel`), grouped by address — a model split
+across files links to one cloud model; several unrelated models in a monorepo
+each link to their own. `cloud.model` supplies the slug when the files declare
+none; it may not contradict a declared one, and with several addresses it is
+an error to set.
+
+Every failure degrades, never fails: no token, a rejected token, a Free-plan
+organisation, or an unreachable host each produce exactly the local review
+plus one line in "Context used" saying why cloud was not connected. Fork and
+Dependabot pull requests have no secrets, so they run local mode with that
+note. `dry-run` suppresses the write-back along with every GitHub write; the
+context call still happens, as the diff fetch does, because it is read-only.
+
+`THREATCL_API_URL` in the job's environment points at a different host
+(default `https://beta-api.threatcl.com`). It is never read from
+`.threatcl-ci.hcl`, which the pull request itself can edit, and must be
+`https` unless the host is loopback.
+
 ### What gets reviewed
 
 Three rules decide which changed files reach the review, and the comment always
@@ -362,8 +435,13 @@ review a file inside an excluded directory, name it in `trigger_paths`.
   comment names the model that answered when that happens. If the review
   cannot be produced at all, the comment says the change could not be
   assessed — never that there is no drift.
-- Self-hosted by design: your code and threat model go only to the LLM
-  provider you configure, under your own key — never to threatcl.
+- Self-hosted by design. Without a Threatcl API token nothing is sent to
+  Threatcl. With one, Threatcl Cloud receives your threat model (to compare
+  it with the cloud copy and evaluate policies), your organisation's library
+  names go to your LLM provider alongside the model, and a counts-only record
+  of each review is written back. Your source code and diffs go only to the
+  LLM provider you configure, under your own key, in either mode — the cloud
+  client cannot be handed a diff by construction, and a test proves it.
 
 ## Related
 
