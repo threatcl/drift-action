@@ -93,12 +93,12 @@ func TestCloudAlignmentPhrases(t *testing.T) {
 		slug string
 		want string
 	}{
-		{"payments", "☁️ Threatcl Cloud: acme — `payments` v1.0.6 (payments.tm.hcl): repo copy matches cloud v1.0.6"},
+		{"payments", "☁️ Threatcl Cloud: acme — `payments` v1.0.6 (`payments.tm.hcl`): repo copy matches cloud v1.0.6"},
 		{"checkout", "this PR changes the model; it becomes the next cloud version after v2.1.0"},
 		{"ledger", "repo copy is 2 versions behind cloud v1.0.6 (last synced at v1.0.4) — see Model sync below"},
 		{"refunds", "repo copy and cloud have both changed since v1.1.0 (cloud is now v1.2.0) — see Model sync below"},
 		{"reporting", "no committed copy matches a cloud version (cloud is at v1.0.0)"},
-		{"ledger-v2", "☁️ Threatcl Cloud: acme — `ledger-v2` (ledger-v2.tm.hcl): no model with this slug in the organisation"},
+		{"ledger-v2", "☁️ Threatcl Cloud: acme — `ledger-v2` (`ledger-v2.tm.hcl`): no model with this slug in the organisation"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.slug, func(t *testing.T) {
@@ -233,6 +233,29 @@ func TestCloudSlugsCannotBreakSpans(t *testing.T) {
 	}
 	if strings.Contains(out, "pay`ments") || strings.Contains(out, "seg`ment") {
 		t.Errorf("a raw backtick from a server identifier reached the comment:\n%s", out)
+	}
+}
+
+// Delta identifiers are threat and control names from both copies of the
+// model, and file paths come from the pull request's config: neither may
+// carry markup or HTML into the comment.
+func TestCloudDeltaAndPathsAreEscaped(t *testing.T) {
+	by := goldenModels(t)
+	m := by["ledger"]
+	m.Alignment.Delta = cloud.Delta{"threats": {Removed: []string{"<img src=x onerror=alert(1)> *bold* [x](y)"}}}
+	out := Comment(&findings.Report{NoDrift: true}, ContextInfo{Cloud: cloudInfo(
+		CloudModel{Files: []string{"a`b*c*.tm.hcl"}, Context: m})})
+	for _, raw := range []string{"<img", "*bold*", "[x](y)", "a`b"} {
+		if strings.Contains(out, raw) {
+			t.Errorf("raw %q reached the comment:\n%s", raw, out)
+		}
+	}
+	if !strings.Contains(out, `"&lt;img src=x onerror=alert(1)&gt; \*bold\* \[x\](y)"`) {
+		t.Errorf("delta identifier not escaped as expected:\n%s", out)
+	}
+	// A path renders inside its own code span, where markup is literal.
+	if !strings.Contains(out, "(`a'b*c*.tm.hcl`)") || !strings.Contains(out, "Model sync — `a'b*c*.tm.hcl` is") {
+		t.Errorf("path not rendered in a code span:\n%s", out)
 	}
 }
 

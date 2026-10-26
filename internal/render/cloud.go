@@ -130,11 +130,17 @@ func versions(n int) string {
 	return fmt.Sprintf("%d versions", n)
 }
 
+// fileList renders model file paths. They come from model_paths in the pull
+// request's own .threatcl-ci.hcl, so each goes in its own stripped code span.
 func fileList(files []string) string {
 	if len(files) == 0 {
 		return "the repo copy"
 	}
-	return "`" + strings.Join(files, "`, `") + "`"
+	quoted := make([]string, len(files))
+	for i, f := range files {
+		quoted[i] = code(f)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 // alignmentPhrase words a model's state for the ☁️ line.
@@ -249,7 +255,7 @@ func writeCloudContext(b *strings.Builder, info ContextInfo) {
 			v = " v" + version(m.Context.Version)
 		}
 		fmt.Fprintf(b, "- ☁️ Threatcl Cloud: %s — %s%s (%s): %s\n",
-			escapeText(c.Org), code(m.Context.Slug), v, strings.Join(m.Files, ", "), alignmentPhrase(m))
+			escapeText(c.Org), code(m.Context.Slug), v, fileList(m.Files), alignmentPhrase(m))
 	}
 	if len(c.Models) == 0 {
 		fmt.Fprintf(b, "- ☁️ Threatcl Cloud: %s — no model linked; library and review record only\n", escapeText(c.Org))
@@ -337,7 +343,7 @@ func describeDelta(delta cloud.Delta) []string {
 			}
 			quoted := make([]string, len(items))
 			for i, item := range items {
-				quoted[i] = fmt.Sprintf("%q", oneLine(item))
+				quoted[i] = `"` + escapeText(item) + `"`
 			}
 			parts = append(parts, fmt.Sprintf("%s %s", noun(key, len(items)), strings.Join(quoted, ", ")))
 		}
@@ -417,7 +423,7 @@ func writeModelSync(b *strings.Builder, info ContextInfo) {
 			"export the current cloud version with `threatcl cloud export`, merge the differences listed in the Model sync block of the drift review "+
 			"(cloud has: what this copy lacks; modified in cloud; this copy has: what cloud lacks) into the repository copy, keep this branch's own edits, "+
 			"then re-run /threat-drift.\n",
-			strings.Join(m.Files, ", "), strings.ReplaceAll(m.Context.Slug, "`", "'"), current)
+			strings.ReplaceAll(strings.Join(m.Files, ", "), "`", "'"), strings.ReplaceAll(m.Context.Slug, "`", "'"), current)
 		b.WriteString("```\n\n</details>\n\n</details>\n")
 	}
 }
