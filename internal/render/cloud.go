@@ -120,7 +120,7 @@ func version(v *string) string {
 	if v == nil || *v == "" {
 		return "?"
 	}
-	return *v
+	return oneLine(strings.ReplaceAll(*v, "`", "'"))
 }
 
 func versions(n int) string {
@@ -161,7 +161,7 @@ func alignmentPhrase(m CloudModel) string {
 	case cloud.StateNotInCloud:
 		return "no model with this slug in the organisation"
 	default:
-		return fmt.Sprintf("alignment state %q", a.State)
+		return fmt.Sprintf("alignment state %q", oneLine(a.State))
 	}
 }
 
@@ -172,24 +172,24 @@ func noteText(m CloudModel, note string) string {
 	slug := m.Context.Slug
 	switch {
 	case note == cloud.NoteOrgMismatch:
-		return fmt.Sprintf("Threatcl Cloud: the backend block for `%s` names a different organisation from the API token's; the token's organisation was used", slug)
+		return fmt.Sprintf("Threatcl Cloud: the backend block for %s names a different organisation from the API token's; the token's organisation was used", code(slug))
 	case note == cloud.NoteRepositoryMismatch:
-		return fmt.Sprintf("Threatcl Cloud: model `%s` declares repositories, and this repository is not among them — check the link", slug)
+		return fmt.Sprintf("Threatcl Cloud: model %s declares repositories, and this repository is not among them — check the link", code(slug))
 	case note == cloud.NoteNoPolicies:
-		return fmt.Sprintf("Threatcl Cloud: the organisation has no enabled policies, so `%s` was not policy-checked", slug)
+		return fmt.Sprintf("Threatcl Cloud: the organisation has no enabled policies, so %s was not policy-checked", code(slug))
 	case note == cloud.NotePolicyUnavailable:
-		return fmt.Sprintf("Threatcl Cloud: policies could not be evaluated against `%s`", slug)
+		return fmt.Sprintf("Threatcl Cloud: policies could not be evaluated against %s", code(slug))
 	case note == cloud.NoteHeadParseError:
-		return fmt.Sprintf("Threatcl Cloud: the pull request's copy of `%s` did not parse on the server, so no delta or policy verdict is available for it", slug)
+		return fmt.Sprintf("Threatcl Cloud: the pull request's copy of %s did not parse on the server, so no delta or policy verdict is available for it", code(slug))
 	case note == cloud.NotePartialSet:
-		return fmt.Sprintf("Threatcl Cloud: `%s` has segments on cloud this repository did not submit; policies were evaluated on the submitted ones only", slug)
+		return fmt.Sprintf("Threatcl Cloud: %s has segments on cloud this repository did not submit; policies were evaluated on the submitted ones only", code(slug))
 	case note == cloud.NoteNotInCloud:
 		return "" // said on the ☁️ line already
 	case strings.HasPrefix(note, cloud.NoteUnplacedFile+":"):
-		return fmt.Sprintf("Threatcl Cloud: `%s` could not be placed in `%s` and contributed to neither alignment nor policy",
-			strings.TrimPrefix(note, cloud.NoteUnplacedFile+":"), slug)
+		return fmt.Sprintf("Threatcl Cloud: %s could not be placed in %s and contributed to neither alignment nor policy",
+			code(strings.TrimPrefix(note, cloud.NoteUnplacedFile+":")), code(slug))
 	default:
-		return fmt.Sprintf("Threatcl Cloud: `%s` — %s", slug, note)
+		return fmt.Sprintf("Threatcl Cloud: %s — %s", code(slug), code(note))
 	}
 }
 
@@ -213,16 +213,16 @@ func writeCloudWarnings(lines []string, info ContextInfo) []string {
 	for _, m := range c.Models {
 		if m.Context.Alignment.State == cloud.StateConflict && !syncing(m.Context.Alignment) {
 			lines = append(lines, fmt.Sprintf(
-				"⚠️ Model sync: %s and Threatcl Cloud `%s` have both changed since v%s — pushing on merge would overwrite the cloud edits; see Model sync below",
-				fileList(m.Files), m.Context.Slug, version(m.Context.Alignment.BaseMatches)))
+				"⚠️ Model sync: %s and Threatcl Cloud %s have both changed since v%s — pushing on merge would overwrite the cloud edits; see Model sync below",
+				fileList(m.Files), code(m.Context.Slug), version(m.Context.Alignment.BaseMatches)))
 		}
 	}
 	if gate.Mode == config.PolicyFailOnEnforcedViolation {
 		for _, m := range c.Models {
 			if m.Context.Policy == nil {
 				lines = append(lines, fmt.Sprintf(
-					"⚠️ Policy gate: `policy_fail_mode` is `%s`, but policies could not be evaluated for `%s`, so this run was not policy-gated",
-					gate.Mode, m.Context.Slug))
+					"⚠️ Policy gate: `policy_fail_mode` is `%s`, but policies could not be evaluated for %s, so this run was not policy-gated",
+					gate.Mode, code(m.Context.Slug)))
 			}
 		}
 		if gate.Blocking > 0 {
@@ -248,11 +248,11 @@ func writeCloudContext(b *strings.Builder, info ContextInfo) {
 		if m.Context.Alignment.State != cloud.StateNotInCloud {
 			v = " v" + version(m.Context.Version)
 		}
-		fmt.Fprintf(b, "- ☁️ Threatcl Cloud: %s — `%s`%s (%s): %s\n",
-			c.Org, m.Context.Slug, v, strings.Join(m.Files, ", "), alignmentPhrase(m))
+		fmt.Fprintf(b, "- ☁️ Threatcl Cloud: %s — %s%s (%s): %s\n",
+			escapeText(c.Org), code(m.Context.Slug), v, strings.Join(m.Files, ", "), alignmentPhrase(m))
 	}
 	if len(c.Models) == 0 {
-		fmt.Fprintf(b, "- ☁️ Threatcl Cloud: %s — no model linked; library and review record only\n", c.Org)
+		fmt.Fprintf(b, "- ☁️ Threatcl Cloud: %s — no model linked; library and review record only\n", escapeText(c.Org))
 	}
 	if c.Library.Threats+c.Library.Controls == 0 {
 		b.WriteString("- 📚 Org library: no referenceable entries, so none were sent\n")
@@ -376,11 +376,11 @@ func writeModelSync(b *strings.Builder, info ContextInfo) {
 
 		var summary string
 		if a.State == cloud.StateBehind {
-			summary = fmt.Sprintf("Model sync — %s is %s behind Threatcl Cloud `%s` v%s",
-				files, versions(a.VersionsBehind), m.Context.Slug, current)
+			summary = fmt.Sprintf("Model sync — %s is %s behind Threatcl Cloud %s v%s",
+				files, versions(a.VersionsBehind), code(m.Context.Slug), current)
 		} else {
-			summary = fmt.Sprintf("Model sync — %s and Threatcl Cloud `%s` have both changed since v%s",
-				files, m.Context.Slug, version(a.BaseMatches))
+			summary = fmt.Sprintf("Model sync — %s and Threatcl Cloud %s have both changed since v%s",
+				files, code(m.Context.Slug), version(a.BaseMatches))
 		}
 		fmt.Fprintf(b, "\n<details>\n<summary>%s</summary>\n\n", summary)
 
@@ -407,7 +407,7 @@ func writeModelSync(b *strings.Builder, info ContextInfo) {
 		if len(a.Segments) > 1 {
 			parts := make([]string, 0, len(a.Segments))
 			for _, s := range a.Segments {
-				parts = append(parts, fmt.Sprintf("`%s` %s at v%s", s.Segment, s.State, version(s.BaseMatches)))
+				parts = append(parts, fmt.Sprintf("%s %s at v%s", code(s.Segment), escapeText(s.State), version(s.BaseMatches)))
 			}
 			fmt.Fprintf(b, "Segments: %s.\n\n", strings.Join(parts, "; "))
 		}
@@ -417,7 +417,7 @@ func writeModelSync(b *strings.Builder, info ContextInfo) {
 			"export the current cloud version with `threatcl cloud export`, merge the differences listed in the Model sync block of the drift review "+
 			"(cloud has: what this copy lacks; modified in cloud; this copy has: what cloud lacks) into the repository copy, keep this branch's own edits, "+
 			"then re-run /threat-drift.\n",
-			strings.Join(m.Files, ", "), m.Context.Slug, current)
+			strings.Join(m.Files, ", "), strings.ReplaceAll(m.Context.Slug, "`", "'"), current)
 		b.WriteString("```\n\n</details>\n\n</details>\n")
 	}
 }
@@ -464,7 +464,7 @@ func writePolicyViolations(b *strings.Builder, info ContextInfo) {
 			if r.Enforced && r.Severity == "error" {
 				icon = "❌"
 			}
-			line := fmt.Sprintf("- %s **%s** on `%s` (%s)", icon, escapeText(r.PolicyName), m.Context.Slug, flags)
+			line := fmt.Sprintf("- %s **%s** on %s (%s)", icon, escapeText(r.PolicyName), code(m.Context.Slug), escapeText(flags))
 			if msg := escapeInline(r.Message); msg != "" {
 				line += " — " + msg
 			}
@@ -491,6 +491,13 @@ func escapeText(s string) string {
 
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(s), " ")
+}
+
+// code renders a server identifier — org slug, model slug, segment name — in
+// a code span. The server validates them as identifiers, but a backtick or a
+// newline in one would still break the span, so both are removed.
+func code(s string) string {
+	return "`" + strings.NewReplacer("`", "'", "\n", " ", "\r", " ").Replace(s) + "`"
 }
 
 // libraryMatches renders a finding's refs from our index. A ref outside it

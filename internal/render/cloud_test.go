@@ -208,8 +208,31 @@ func TestCloudNotes(t *testing.T) {
 	m := by["payments"]
 	m.Notes = []string{"something_new"}
 	out = Comment(&findings.Report{NoDrift: true}, ContextInfo{Cloud: cloudInfo(CloudModel{Files: []string{"p.tm.hcl"}, Context: m})})
-	if !strings.Contains(out, "Threatcl Cloud: `payments` — something_new") {
+	if !strings.Contains(out, "Threatcl Cloud: `payments` — `something_new`") {
 		t.Errorf("unknown note dropped:\n%s", out)
+	}
+}
+
+// Server identifiers are validated server-side, but a backtick in one must
+// still not break out of its code span.
+func TestCloudSlugsCannotBreakSpans(t *testing.T) {
+	by := goldenModels(t)
+	m := by["payments"]
+	m.Slug = "pay`ments"
+	m.Notes = []string{"odd`note"}
+	m.Alignment.Segments = []cloud.SegmentAlignment{{Segment: "seg`ment", State: "aligned"}, {Segment: "b", State: "behind"}}
+	m.Alignment.State = cloud.StateBehind
+	m.Alignment.Delta = cloud.Delta{}
+	info := cloudInfo(CloudModel{Files: []string{"p.tm.hcl"}, Context: m})
+	info.Org = "ac`me"
+	out := Comment(&findings.Report{NoDrift: true}, ContextInfo{Cloud: info})
+	for _, want := range []string{"`pay'ments`", "`odd'note`", "`seg'ment`", "ac'me"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "pay`ments") || strings.Contains(out, "seg`ment") {
+		t.Errorf("a raw backtick from a server identifier reached the comment:\n%s", out)
 	}
 }
 
