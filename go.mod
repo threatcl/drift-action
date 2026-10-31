@@ -10,7 +10,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/threatcl/spec v0.8.4
 	github.com/zclconf/go-cty v1.19.0
-	google.golang.org/genai v1.75.0
+	google.golang.org/genai v1.76.0
 )
 
 require (
