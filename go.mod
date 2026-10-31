@@ -1,6 +1,6 @@
 module github.com/threatcl/drift-action
 
-go 1.27.2
+go 1.27.3
 
 require (
 	github.com/anthropics/anthropic-sdk-go v1.84.0
@@ -8,7 +8,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/openai/openai-go/v3 v3.83.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
-	github.com/threatcl/spec v0.8.3
+	github.com/threatcl/spec v0.8.4
 	github.com/zclconf/go-cty v1.19.0
 	google.golang.org/genai v1.75.0
 )
