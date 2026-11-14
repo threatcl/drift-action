@@ -8,7 +8,7 @@ require (
 	github.com/hashicorp/hcl/v2 v2.25.0
 	github.com/openai/openai-go/v3 v3.93.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
-	github.com/threatcl/spec v0.8.4
+	github.com/threatcl/spec v0.8.5
 	github.com/zclconf/go-cty v1.20.0
 	google.golang.org/genai v1.77.0
 )
@@ -79,7 +79,7 @@ require (
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/hashicorp/go-version v1.9.0 // indirect
 	github.com/invopop/jsonschema v0.14.0 // indirect
-	github.com/klauspost/compress v1.20.1 // indirect
+	github.com/klauspost/compress v1.20.3 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/mitchellh/go-wordwrap v1.0.1 // indirect
 	github.com/pb33f/ordered-map/v2 v2.3.1 // indirect
